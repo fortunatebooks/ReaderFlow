@@ -13,13 +13,17 @@ struct ContinuousDocumentBuilder {
         title: String,
         chapters: [ContinuousDocumentChapter],
         settings: ReaderSettingsEntity,
-        bridgeToken: String
+        bridgeToken: String,
+        bookId: UUID? = nil,
+        bookFingerprint: String = ""
     ) -> String {
         buildDocument(
             title: title,
             chapters: chapters,
             settings: ReaderDocumentSettings(settings),
-            bridgeToken: bridgeToken
+            bridgeToken: bridgeToken,
+            bookId: bookId,
+            bookFingerprint: bookFingerprint
         )
     }
 
@@ -27,7 +31,9 @@ struct ContinuousDocumentBuilder {
         title: String,
         chapters: [ContinuousDocumentChapter],
         settings: ReaderDocumentSettings,
-        bridgeToken: String
+        bridgeToken: String,
+        bookId: UUID? = nil,
+        bookFingerprint: String = ""
     ) -> String {
         let chapterHTML = chapters.enumerated()
             .map { index, chapter in
@@ -52,6 +58,8 @@ struct ContinuousDocumentBuilder {
           </main>
           <script>
             window.__readerFlowBridgeToken = "\(bridgeToken.htmlEscaped)";
+            window.__readerFlowBookId = "\(bookId?.uuidString ?? "00000000-0000-0000-0000-000000000000")";
+            window.__readerFlowBookFingerprint = "\(bookFingerprint.htmlEscaped)";
           </script>
           <script>
             \(ReaderWebAssets.javascript)
@@ -66,7 +74,7 @@ struct ContinuousDocumentBuilder {
         let title = chapter.title.htmlEscaped
         let href = chapter.href.htmlEscaped
         return """
-        <section class="rf-chapter" data-spine-index="\(index)" data-href="\(href)" data-title="\(title)">
+        <section id="rf-spine-\(index)" class="rf-chapter" data-spine-index="\(index)" data-href="\(href)" data-title="\(title)">
           \(sanitizedBody)
         </section>
         """

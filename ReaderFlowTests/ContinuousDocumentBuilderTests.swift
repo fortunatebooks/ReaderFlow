@@ -1,3 +1,4 @@
+import Foundation
 @testable import ReaderFlow
 import Testing
 
@@ -19,14 +20,19 @@ struct ContinuousDocumentBuilderTests {
                 ),
             ],
             settings: settings,
-            bridgeToken: "token"
+            bridgeToken: "token",
+            bookId: UUID(uuidString: "44444444-4444-4444-4444-444444444444"),
+            bookFingerprint: "fingerprint"
         )
 
+        #expect(html.contains("id=\"rf-spine-0\""))
         #expect(html.contains("data-spine-index=\"0\""))
         #expect(html.contains("<p>Text</p>"))
         #expect(!html.localizedCaseInsensitiveContains("<script>alert"))
         #expect(!html.localizedCaseInsensitiveContains("onclick"))
         #expect(html.contains("window.__readerFlowBridgeToken"))
+        #expect(html.contains("window.__readerFlowBookId = \"44444444-4444-4444-4444-444444444444\""))
+        #expect(html.contains("window.__readerFlowBookFingerprint = \"fingerprint\""))
     }
 
     @Test func emitsReaderSettingsCSSVariables() {

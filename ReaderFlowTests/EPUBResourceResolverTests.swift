@@ -59,6 +59,17 @@ struct EPUBResourceResolverTests {
 
         #expect(url.absoluteString == "readerflow://book/11111111-1111-1111-1111-111111111111/OPS/Images/cover%20art.jpg")
     }
+
+    @Test func preservesPercentEncodedHashInResourcePath() throws {
+        let resolver = EPUBResourceResolver(packageRoot: "OPS")
+        let bookId = try #require(UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
+
+        let path = try #require(resolver.normalizedResourcePath("../Images/cover%231.jpg", relativeTo: "Text/chapter1.xhtml"))
+        let url = try #require(resolver.readerURL(forNormalizedResourcePath: path, bookId: bookId))
+
+        #expect(path == "OPS/Images/cover%231.jpg")
+        #expect(url.absoluteString == "readerflow://book/11111111-1111-1111-1111-111111111111/OPS/Images/cover%231.jpg")
+    }
 }
 
 struct EPUBContentLoaderTests {
@@ -82,6 +93,7 @@ struct EPUBContentLoaderTests {
                 <p style="background-image: url('../Images/bg.jpg')">First text.</p>
                 <img src="../Images/cover art.jpg" srcset="../Images/cover-small.jpg 1x, ../Images/cover%20large.jpg 2x"/>
                 <a href="chapter2.xhtml#next">Next</a>
+                <a href="chapter2.xhtml">Next chapter</a>
                 <a href="#local-note">Local</a>
                 <img src="../../secret.png"/>
                 <img src="https://example.com/remote.png"/>
@@ -108,6 +120,20 @@ struct EPUBContentLoaderTests {
                 .appendingPathComponent("Text")
                 .appendingPathComponent("chapter2.xhtml")
         )
+        try write(
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <body>
+                <h2>Hash Chapter</h2>
+                <p>Hash filename text.</p>
+              </body>
+            </html>
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Text")
+                .appendingPathComponent("chapter#1.xhtml")
+        )
 
         let bookId = try #require(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
         let package = EPUBPackageDocument(
@@ -128,6 +154,12 @@ struct EPUBContentLoaderTests {
                     properties: []
                 ),
                 EPUBManifestItem(
+                    id: "chapter-hash",
+                    href: "Text/chapter%231.xhtml",
+                    mediaType: "application/xhtml+xml",
+                    properties: []
+                ),
+                EPUBManifestItem(
                     id: "style",
                     href: "Styles/book.css",
                     mediaType: "text/css",
@@ -138,6 +170,7 @@ struct EPUBContentLoaderTests {
                 EPUBSpineItem(idref: "chapter-1", linear: true),
                 EPUBSpineItem(idref: "style", linear: true),
                 EPUBSpineItem(idref: "chapter-2", linear: true),
+                EPUBSpineItem(idref: "chapter-hash", linear: true),
             ]
         )
 
@@ -147,14 +180,15 @@ struct EPUBContentLoaderTests {
             bookId: bookId
         )
 
-        #expect(chapters.map(\.href) == ["Text/chapter%201.xhtml", "Text/chapter2.xhtml"])
-        #expect(chapters.map(\.title) == ["Chapter One", "Second Chapter"])
-        #expect(chapters[0].bodyHTML.contains("<p>First text.</p>"))
+        #expect(chapters.map(\.href) == ["Text/chapter%201.xhtml", "Text/chapter2.xhtml", "Text/chapter%231.xhtml"])
+        #expect(chapters.map(\.title) == ["Chapter One", "Second Chapter", "Hash Chapter"])
+        #expect(chapters[0].bodyHTML.contains("First text."))
         #expect(!chapters[0].bodyHTML.contains("<title>"))
         #expect(chapters[0].bodyHTML.contains("src=\"readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover%20art.jpg\""))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover-small.jpg 1x"))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover%20large.jpg 2x"))
-        #expect(chapters[0].bodyHTML.contains("href=\"readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Text/chapter2.xhtml#next\""))
+        #expect(chapters[0].bodyHTML.contains("href=\"#next\""))
+        #expect(chapters[0].bodyHTML.contains("href=\"#rf-spine-1\""))
         #expect(chapters[0].bodyHTML.contains("href=\"#local-note\""))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/bg.jpg"))
         #expect(!chapters[0].bodyHTML.localizedCaseInsensitiveContains("<script"))

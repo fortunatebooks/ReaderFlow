@@ -8,15 +8,14 @@ struct EPUBResourceResolver {
             return nil
         }
 
-        let rawPath = components.path
-        guard let decodedPath = rawPath.removingPercentEncoding,
-              !decodedPath.hasPrefix("/")
+        let encodedPath = components.percentEncodedPath
+        guard !encodedPath.hasPrefix("/")
         else {
             return nil
         }
 
         let rootParts = pathParts(packageRoot)
-        if decodedPath.isEmpty {
+        if encodedPath.isEmpty {
             guard let basePath,
                   let baseParts = normalizedBaseResourceParts(basePath, rootParts: rootParts),
                   !baseParts.isEmpty,
@@ -41,8 +40,11 @@ struct EPUBResourceResolver {
         }
         let rootDepth = rootParts.count
 
-        for part in pathParts(decodedPath) {
-            switch part {
+        for part in pathParts(encodedPath) {
+            guard let decodedPart = part.removingPercentEncoding else {
+                return nil
+            }
+            switch decodedPart {
             case ".":
                 continue
             case "..":
@@ -78,7 +80,7 @@ struct EPUBResourceResolver {
         var components = URLComponents()
         components.scheme = "readerflow"
         components.host = "book"
-        components.path = "/" + ([bookId.uuidString] + resourceParts).joined(separator: "/")
+        components.percentEncodedPath = "/" + ([bookId.uuidString] + resourceParts).joined(separator: "/")
         components.fragment = fragment?.isEmpty == false ? fragment : nil
         return components.url
     }
@@ -90,15 +92,19 @@ struct EPUBResourceResolver {
     }
 
     private func normalizedBaseResourceParts(_ basePath: String, rootParts: [String]) -> [String]? {
-        guard let decodedBasePath = basePath.removingPercentEncoding,
-              !decodedBasePath.hasPrefix("/")
+        guard let components = URLComponents(string: basePath),
+              components.scheme == nil,
+              !components.percentEncodedPath.hasPrefix("/")
         else {
             return nil
         }
 
         var parts: [String] = []
-        for part in pathParts(decodedBasePath) {
-            switch part {
+        for part in pathParts(components.percentEncodedPath) {
+            guard let decodedPart = part.removingPercentEncoding else {
+                return nil
+            }
+            switch decodedPart {
             case ".":
                 continue
             case "..":

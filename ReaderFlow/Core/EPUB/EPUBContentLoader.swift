@@ -19,11 +19,10 @@ struct EPUBContentLoader {
         bookId: UUID
     ) throws -> [ContinuousDocumentChapter] {
         let resolver = package.resourceResolver
-        return try package.readingOrder.compactMap { item in
-            guard item.linear, isHTML(item.mediaType) else {
-                return nil
-            }
+        let chapterItems = package.readingOrder.filter { $0.linear && isHTML($0.mediaType) }
+        let internalLinkTargets = internalLinkTargets(for: chapterItems, resolver: resolver)
 
+        return try chapterItems.map { item in
             let chapterURL = try chapterFileURL(
                 for: item,
                 expandedRootURL: expandedRootURL,
@@ -45,7 +44,8 @@ struct EPUBContentLoader {
                 in: body,
                 baseHref: item.href,
                 resolver: resolver,
-                bookId: bookId
+                bookId: bookId,
+                internalLinkTargets: internalLinkTargets
             )
 
             return try ContinuousDocumentChapter(
@@ -90,7 +90,7 @@ struct EPUBContentLoader {
         let candidate = resourcePath
             .split(separator: "/")
             .reduce(root) { partialURL, component in
-                partialURL.appendingPathComponent(String(component))
+                partialURL.appendingPathComponent(String(component).removingPercentEncoding ?? String(component))
             }
             .standardizedFileURL
 
@@ -124,9 +124,18 @@ struct EPUBContentLoader {
         in body: Element,
         baseHref: String,
         resolver: EPUBResourceResolver,
-        bookId: UUID
+        bookId: UUID,
+        internalLinkTargets: [String: String]
     ) throws {
-        try rewriteURLAttribute("href", selector: "[href]", in: body, baseHref: baseHref, resolver: resolver, bookId: bookId)
+        try rewriteURLAttribute(
+            "href",
+            selector: "[href]",
+            in: body,
+            baseHref: baseHref,
+            resolver: resolver,
+            bookId: bookId,
+            internalLinkTargets: internalLinkTargets
+        )
         try rewriteURLAttribute("src", selector: "[src]", in: body, baseHref: baseHref, resolver: resolver, bookId: bookId)
         try rewriteURLAttribute("poster", selector: "[poster]", in: body, baseHref: baseHref, resolver: resolver, bookId: bookId)
         try rewriteURLAttribute(
@@ -148,12 +157,28 @@ struct EPUBContentLoader {
         in body: Element,
         baseHref: String,
         resolver: EPUBResourceResolver,
-        bookId: UUID
+        bookId: UUID,
+        internalLinkTargets: [String: String] = [:]
     ) throws {
         for element in try body.select(selector).array() {
             let value = try element.attr(attribute)
             if shouldPreserveLocalFragment(value) {
                 continue
+            }
+            if attribute == "href" {
+                if let internalHref = internalDocumentHref(
+                    for: value,
+                    baseHref: baseHref,
+                    resolver: resolver,
+                    targets: internalLinkTargets
+                ) {
+                    try element.attr(attribute, internalHref)
+                    continue
+                }
+                if isHTMLResourceHref(value, baseHref: baseHref, resolver: resolver) {
+                    try element.removeAttr(attribute)
+                    continue
+                }
             }
             if let readerURL = readerURL(for: value, bookId: bookId, relativeTo: baseHref, resolver: resolver) {
                 try element.attr(attribute, readerURL.absoluteString)
@@ -282,6 +307,79 @@ struct EPUBContentLoader {
             return nil
         }
         return resolver.readerURL(for: trimmed, bookId: bookId, relativeTo: baseHref)
+    }
+
+    private func internalLinkTargets(
+        for items: [EPUBReadingOrderItem],
+        resolver: EPUBResourceResolver
+    ) -> [String: String] {
+        var targets: [String: String] = [:]
+        for (index, item) in items.enumerated() {
+            guard let normalizedPath = resolver.normalizedResourcePath(item.href) else {
+                continue
+            }
+            let path = resourcePath(from: normalizedPath)
+            if targets[path] == nil {
+                targets[path] = "rf-spine-\(index)"
+            }
+        }
+        return targets
+    }
+
+    private func internalDocumentHref(
+        for href: String,
+        baseHref: String,
+        resolver: EPUBResourceResolver,
+        targets: [String: String]
+    ) -> String? {
+        let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.hasPrefix("//"),
+              URLComponents(string: trimmed)?.scheme == nil,
+              let normalizedPath = resolver.normalizedResourcePath(trimmed, relativeTo: baseHref)
+        else {
+            return nil
+        }
+
+        let resourcePath = resourcePath(from: normalizedPath)
+        guard let targetID = targets[resourcePath] else {
+            return nil
+        }
+        let fragment = fragment(from: normalizedPath)
+        return fragment.map { "#\($0)" } ?? "#\(targetID)"
+    }
+
+    private func isHTMLResourceHref(
+        _ href: String,
+        baseHref: String,
+        resolver: EPUBResourceResolver
+    ) -> Bool {
+        let trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !trimmed.hasPrefix("//"),
+              URLComponents(string: trimmed)?.scheme == nil,
+              let normalizedPath = resolver.normalizedResourcePath(trimmed, relativeTo: baseHref)
+        else {
+            return false
+        }
+
+        let path = resourcePath(from: normalizedPath).lowercased()
+        return path.hasSuffix(".xhtml") || path.hasSuffix(".html") || path.hasSuffix(".htm")
+    }
+
+    private func resourcePath(from normalizedPath: String) -> String {
+        normalizedPath
+            .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+            .map(String.init) ?? normalizedPath
+    }
+
+    private func fragment(from normalizedPath: String) -> String? {
+        let parts = normalizedPath.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count > 1, !parts[1].isEmpty else {
+            return nil
+        }
+        return String(parts[1])
     }
 
     private func chapterTitle(document: Document, body: Element, fallback: String) -> String {

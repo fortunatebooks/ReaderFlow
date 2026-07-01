@@ -156,6 +156,7 @@ struct ReaderView: View {
 
         let bookId = book.id
         let title = book.title
+        let contentFingerprint = book.contentFingerprint
         let expandedDirectoryName = book.expandedDirectoryName
         let documentSettings = ReaderDocumentSettings(activeSettings)
         let currentBridgeToken = bridgeToken
@@ -185,7 +186,9 @@ struct ReaderView: View {
                     title: title,
                     chapters: chapters,
                     settings: documentSettings,
-                    bridgeToken: currentBridgeToken
+                    bridgeToken: currentBridgeToken,
+                    bookId: bookId,
+                    bookFingerprint: contentFingerprint
                 )
             }.value
 

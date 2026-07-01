@@ -17,7 +17,7 @@ enum ReaderHTMLBuilder {
         </head>
         <body>
           <main id="book">
-            <section class="rf-chapter" data-spine-index="0" data-href="placeholder.xhtml" data-title="Imported Book">
+            <section id="rf-spine-0" class="rf-chapter" data-spine-index="0" data-href="placeholder.xhtml" data-title="Imported Book">
               <h1>\(escapedTitle)</h1>
               <p>This EPUB has been imported. The next implementation stage replaces this placeholder with sanitized EPUB chapter content from the continuous document builder.</p>
               <p>Select text here to exercise the excerpt bridge while the full EPUB renderer is being connected.</p>
@@ -27,6 +27,8 @@ enum ReaderHTMLBuilder {
           </main>
           <script>
             window.__readerFlowBridgeToken = "\(escapedBridgeToken)";
+            window.__readerFlowBookId = "\(book.id.uuidString)";
+            window.__readerFlowBookFingerprint = "\(book.contentFingerprint.htmlEscaped)";
           </script>
           <script>
             \(ReaderWebAssets.javascript)
@@ -122,6 +124,62 @@ enum ReaderWebAssets {
         requestAnimationFrame(tick);
       };
 
+      const wordsBefore = (text, count = 10) => text
+        .trim()
+        .split(/\\s+/)
+        .filter(Boolean)
+        .slice(-count)
+        .join(' ');
+
+      const wordsAfter = (text, count = 10) => text
+        .trim()
+        .split(/\\s+/)
+        .filter(Boolean)
+        .slice(0, count)
+        .join(' ');
+
+      const closestChapter = (node) => {
+        let current = node;
+        if (current && current.nodeType === Node.TEXT_NODE) {
+          current = current.parentElement;
+        }
+        return (current && current.closest && current.closest('.rf-chapter')) || document.querySelector('.rf-chapter');
+      };
+
+      const selectionContext = (range, chapter) => {
+        if (!chapter) {
+          return { before: '', after: '' };
+        }
+        try {
+          const beforeRange = document.createRange();
+          beforeRange.selectNodeContents(chapter);
+          beforeRange.setEnd(range.startContainer, range.startOffset);
+
+          const afterRange = document.createRange();
+          afterRange.selectNodeContents(chapter);
+          afterRange.setStart(range.endContainer, range.endOffset);
+
+          return {
+            before: wordsBefore(beforeRange.toString()),
+            after: wordsAfter(afterRange.toString())
+          };
+        } catch (_) {
+          return { before: '', after: '' };
+        }
+      };
+
+      const chapterProgression = (range, chapter) => {
+        if (!chapter) {
+          return progress().totalProgression;
+        }
+        const chapterRect = chapter.getBoundingClientRect();
+        const rangeRect = range.getBoundingClientRect();
+        const chapterTop = window.scrollY + chapterRect.top;
+        const selectionTop = window.scrollY + (rangeRect.height > 0 ? rangeRect.top : chapterRect.top);
+        const chapterHeight = Math.max(1, chapter.scrollHeight || chapterRect.height || 1);
+        return Math.max(0, Math.min(1, (selectionTop - chapterTop) / chapterHeight));
+      };
+
       const selectionPayload = () => {
         const selection = window.getSelection();
         if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
@@ -133,22 +191,28 @@ enum ReaderWebAssets {
         }
         const id = crypto.randomUUID();
         const current = progress();
+        const range = selection.getRangeAt(0);
+        const chapter = closestChapter(range.startContainer);
+        const context = selectionContext(range, chapter);
+        const spineIndex = Number(chapter && chapter.dataset ? chapter.dataset.spineIndex : 0) || 0;
+        const href = (chapter && chapter.dataset && chapter.dataset.href) || '';
+        const chapterTitle = (chapter && chapter.dataset && chapter.dataset.title) || null;
         return {
           highlightId: id,
           selectedText: text,
-          contextBefore: '',
-          contextAfter: '',
+          contextBefore: context.before,
+          contextAfter: context.after,
           locator: {
-            bookId: '00000000-0000-0000-0000-000000000000',
-            bookFingerprint: '',
-            spineIndex: 0,
-            href: 'placeholder.xhtml',
-            chapterTitle: 'Imported Book',
-            chapterProgression: current.totalProgression,
+            bookId: window.__readerFlowBookId || '00000000-0000-0000-0000-000000000000',
+            bookFingerprint: window.__readerFlowBookFingerprint || '',
+            spineIndex,
+            href,
+            chapterTitle,
+            chapterProgression: chapterProgression(range, chapter),
             totalProgression: current.totalProgression,
             scrollY: current.scrollY,
             documentHeight: current.documentHeight,
-            textQuote: { exact: text, prefix: '', suffix: '', normalizedStartOffset: null, normalizedEndOffset: null },
+            textQuote: { exact: text, prefix: context.before, suffix: context.after, normalizedStartOffset: null, normalizedEndOffset: null },
             domTextPath: null,
             contentHash: null,
             readiumLocatorJSON: null,
