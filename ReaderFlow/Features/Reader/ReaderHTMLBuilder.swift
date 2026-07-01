@@ -88,6 +88,7 @@ enum ReaderWebAssets {
       let lastTime = null;
       let lastProgressPost = 0;
       let touchStart = null;
+      let suppressNextClick = false;
 
       const progress = () => {
         const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
@@ -249,6 +250,10 @@ enum ReaderWebAssets {
       });
 
       document.addEventListener('click', (event) => {
+        if (suppressNextClick) {
+          suppressNextClick = false;
+          return;
+        }
         if (event.target && event.target.closest && event.target.closest('a')) {
           return;
         }
@@ -289,6 +294,7 @@ enum ReaderWebAssets {
         }
 
         event.preventDefault();
+        suppressNextClick = true;
         post('speedAdjustment', { delta: dy < 0 ? 5 : -5 });
       }, { passive: false });
 
