@@ -3,9 +3,16 @@ import SwiftUI
 import UIKit
 
 struct BookExcerptsView: View {
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ExcerptEntity.createdAt, order: .reverse) private var excerpts: [ExcerptEntity]
     let book: BookEntity
+    let onSelectExcerpt: ((ExcerptEntity) -> Void)?
+
+    init(book: BookEntity, onSelectExcerpt: ((ExcerptEntity) -> Void)? = nil) {
+        self.book = book
+        self.onSelectExcerpt = onSelectExcerpt
+    }
 
     private var bookExcerpts: [ExcerptEntity] {
         excerpts
@@ -20,7 +27,7 @@ struct BookExcerptsView: View {
             } else {
                 Section {
                     ForEach(bookExcerpts) { excerpt in
-                        ExcerptRow(excerpt: excerpt)
+                        excerptRow(excerpt)
                             .swipeActions {
                                 Button(role: .destructive) {
                                     modelContext.delete(excerpt)
@@ -48,6 +55,27 @@ struct BookExcerptsView: View {
                 }
                 .disabled(bookExcerpts.isEmpty)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func excerptRow(_ excerpt: ExcerptEntity) -> some View {
+        if excerpt.sourceBookAvailable, let onSelectExcerpt {
+            Button {
+                onSelectExcerpt(excerpt)
+                dismiss()
+            } label: {
+                ExcerptRow(excerpt: excerpt)
+            }
+            .buttonStyle(.plain)
+        } else if excerpt.sourceBookAvailable {
+            NavigationLink {
+                ReaderView(book: book, initialPosition: excerpt.readerInitialPosition)
+            } label: {
+                ExcerptRow(excerpt: excerpt)
+            }
+        } else {
+            ExcerptRow(excerpt: excerpt)
         }
     }
 }
@@ -86,12 +114,17 @@ struct ArchivedExcerptsView: View {
 }
 
 struct AllExcerptsView: View {
+    @Query(sort: \BookEntity.titleSortKey) private var books: [BookEntity]
     @Query(sort: \ExcerptEntity.createdAt, order: .reverse) private var excerpts: [ExcerptEntity]
 
     private var excerptGroups: [(key: ExcerptBookGroupKey, excerpts: [ExcerptEntity])] {
         Dictionary(grouping: excerpts, by: ExcerptBookGroupKey.init)
             .map { ($0.key, $0.value.sorted { $0.sortProgress < $1.sortProgress }) }
             .sorted(by: sortBookGroups)
+    }
+
+    private var availableBooksById: [UUID: BookEntity] {
+        Dictionary(uniqueKeysWithValues: books.filter { !$0.isArchived }.map { ($0.id, $0) })
     }
 
     var body: some View {
@@ -102,7 +135,7 @@ struct AllExcerptsView: View {
                 ForEach(excerptGroups, id: \.key) { group in
                     Section {
                         ForEach(group.excerpts) { excerpt in
-                            ExcerptRow(excerpt: excerpt)
+                            excerptRow(excerpt)
                         }
                     } header: {
                         VStack(alignment: .leading, spacing: 2) {
@@ -126,6 +159,19 @@ struct AllExcerptsView: View {
                 }
                 .disabled(excerpts.isEmpty)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func excerptRow(_ excerpt: ExcerptEntity) -> some View {
+        if excerpt.sourceBookAvailable, let book = availableBooksById[excerpt.bookId] {
+            NavigationLink {
+                ReaderView(book: book, initialPosition: excerpt.readerInitialPosition)
+            } label: {
+                ExcerptRow(excerpt: excerpt)
+            }
+        } else {
+            ExcerptRow(excerpt: excerpt)
         }
     }
 }

@@ -6,6 +6,21 @@ struct ReaderView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var settings: [ReaderSettingsEntity]
     let book: BookEntity
+    let initialPosition: ReaderInitialPosition?
+    let initialNavigationRequest: ReaderNavigationRequest?
+
+    init(book: BookEntity, initialPosition: ReaderInitialPosition? = nil) {
+        self.book = book
+        self.initialPosition = initialPosition
+        initialNavigationRequest = initialPosition.map {
+            ReaderNavigationRequest(
+                id: UUID(),
+                href: $0.href,
+                chapterProgression: $0.chapterProgression,
+                fallbackProgress: $0.progress
+            )
+        }
+    }
 
     @State private var isScrolling = false
     @State private var speed: Double = 25
@@ -16,6 +31,7 @@ struct ReaderView: View {
     @State private var showingTableOfContents = false
     @State private var navigationRequest: ReaderNavigationRequest?
     @State private var bridgeToken = UUID().uuidString
+    @State private var hasCompletedInitialAppear = false
 
     private var activeSettings: ReaderSettingsEntity {
         if let existing = settings.first {
@@ -32,8 +48,8 @@ struct ReaderView: View {
                 expectedBridgeToken: bridgeToken,
                 expectedBookId: book.id,
                 bookResourceRootURL: bookResourceRootURL,
-                initialProgress: book.readingProgress,
-                navigationRequest: navigationRequest,
+                initialProgress: initialPosition?.progress ?? book.readingProgress,
+                navigationRequest: navigationRequest ?? initialNavigationRequest,
                 speed: $speed,
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
@@ -80,7 +96,9 @@ struct ReaderView: View {
                 .disabled(tableOfContentsEntries.isEmpty)
 
                 NavigationLink {
-                    BookExcerptsView(book: book)
+                    BookExcerptsView(book: book) { excerpt in
+                        navigateToExcerpt(excerpt)
+                    }
                 } label: {
                     Label("Excerpts", systemImage: "text.quote")
                 }
@@ -89,10 +107,17 @@ struct ReaderView: View {
         .onAppear {
             ensureSettings()
             speed = activeSettings.autoscrollSpeed
-            isScrolling = book.lastOpenedAt != nil
+            guard !hasCompletedInitialAppear else { return }
+            hasCompletedInitialAppear = true
+            isScrolling = initialPosition == nil && book.lastOpenedAt != nil
             book.lastOpenedAt = .now
             book.lastOpenedSortKey = .now
             try? modelContext.save()
+            showExcerptJumpConfirmationIfNeeded()
+        }
+        .onDisappear {
+            isScrolling = false
+            showControls = true
         }
         .task(id: readerDocumentReloadID) {
             await loadReaderHTML()
@@ -251,6 +276,17 @@ struct ReaderView: View {
         }
     }
 
+    private func showExcerptJumpConfirmationIfNeeded() {
+        guard initialPosition != nil else { return }
+        showControls = true
+        confirmationText = "Excerpt location"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            if confirmationText == "Excerpt location" {
+                confirmationText = nil
+            }
+        }
+    }
+
     private func toggleReaderPlayback() {
         withAnimation(.easeOut(duration: 0.2)) {
             isScrolling.toggle()
@@ -276,6 +312,24 @@ struct ReaderView: View {
     private func navigateToTableOfContentsEntry(_ entry: TableOfContentsEntry) {
         navigationRequest = ReaderNavigationRequest(id: UUID(), href: entry.href)
         showingTableOfContents = false
+    }
+
+    private func navigateToExcerpt(_ excerpt: ExcerptEntity) {
+        let position = excerpt.readerInitialPosition
+        isScrolling = false
+        showControls = true
+        navigationRequest = ReaderNavigationRequest(
+            id: UUID(),
+            href: position.href,
+            chapterProgression: position.chapterProgression,
+            fallbackProgress: position.progress
+        )
+        confirmationText = "Excerpt location"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            if confirmationText == "Excerpt location" {
+                confirmationText = nil
+            }
+        }
     }
 
     private func saveSelection(_ selection: ReaderSelectionPayload) {

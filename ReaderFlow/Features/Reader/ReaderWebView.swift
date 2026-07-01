@@ -15,7 +15,16 @@ struct ReaderSpeedAdjustmentMessage: Decodable, Hashable {
 
 struct ReaderNavigationRequest: Hashable {
     var id: UUID
-    var href: String
+    var href: String?
+    var chapterProgression: Double?
+    var fallbackProgress: Double?
+
+    init(id: UUID, href: String?, chapterProgression: Double? = nil, fallbackProgress: Double? = nil) {
+        self.id = id
+        self.href = href
+        self.chapterProgression = chapterProgression
+        self.fallbackProgress = fallbackProgress
+    }
 }
 
 struct ReaderWebView: UIViewRepresentable {
@@ -191,8 +200,11 @@ struct ReaderWebView: UIViewRepresentable {
                 return
             }
             appliedNavigationRequestID = request.id
+            let hrefLiteral = javaScriptStringLiteral(request.href ?? "")
+            let chapterProgression = javaScriptNumberLiteral(request.chapterProgression)
+            let fallbackProgress = javaScriptNumberLiteral(request.fallbackProgress)
             webView.evaluateJavaScript(
-                "window.ReaderFlow && window.ReaderFlow.scrollToHref(\(javaScriptStringLiteral(request.href)));"
+                "window.ReaderFlow && window.ReaderFlow.scrollToLocator(\(hrefLiteral), \(chapterProgression), \(fallbackProgress));"
             )
         }
 
@@ -224,6 +236,13 @@ struct ReaderWebView: UIViewRepresentable {
                 return "\"\""
             }
             return encoded
+        }
+
+        private func javaScriptNumberLiteral(_ value: Double?) -> String {
+            guard let value else {
+                return "null"
+            }
+            return String(min(1, max(0, value)))
         }
 
         private func decode<T: Decodable>(_ type: T.Type, from object: Any?) -> T? {

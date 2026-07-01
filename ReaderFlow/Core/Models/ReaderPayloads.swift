@@ -35,6 +35,30 @@ struct ReaderLocator: Codable, Hashable {
     var createdAt: Date
 }
 
+struct ReaderInitialPosition: Hashable {
+    var progress: Double
+    var href: String?
+    var chapterProgression: Double?
+
+    init(progress: Double, href: String? = nil, chapterProgression: Double? = nil) {
+        self.progress = ReaderInitialPosition.bounded(progress)
+        self.href = href
+        self.chapterProgression = chapterProgression.map(ReaderInitialPosition.bounded)
+    }
+
+    init(locator: ReaderLocator) {
+        self.init(
+            progress: locator.totalProgression,
+            href: locator.href.isEmpty ? nil : locator.href,
+            chapterProgression: locator.chapterProgression
+        )
+    }
+
+    private static func bounded(_ value: Double) -> Double {
+        min(1, max(0, value))
+    }
+}
+
 struct TextQuoteSelector: Codable, Hashable {
     var exact: String
     var prefix: String

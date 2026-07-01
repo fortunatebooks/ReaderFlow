@@ -297,6 +297,30 @@ enum ReaderWebAssets {
         post('speedAdjustment', { delta: dy < 0 ? 5 : -5 });
       }, { passive: false });
 
+      const chapterForHref = (value) => {
+        const href = String(value || '').split('#')[0];
+        if (!href) {
+          return null;
+        }
+        const chapters = Array.from(document.querySelectorAll('.rf-chapter'));
+        return chapters.find((chapter) => chapter.dataset.normalizedHref === href || chapter.dataset.href === href) || null;
+      };
+
+      const scrollToChapterProgress = (chapter, value) => {
+        const chapterProgress = Math.max(0, Math.min(1, Number(value) || 0));
+        const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+        const viewportHeight = window.innerHeight || 1;
+        const maxScroll = Math.max(0, documentHeight - viewportHeight);
+        const chapterRect = chapter.getBoundingClientRect();
+        const chapterTop = window.scrollY + chapterRect.top;
+        const chapterHeight = Math.max(1, chapter.scrollHeight || chapterRect.height || 1);
+        const target = Math.max(0, Math.min(maxScroll, chapterTop + chapterHeight * chapterProgress));
+        window.scrollTo(0, target);
+        post('progressChanged', progress());
+      };
+
+      const finiteNumber = (value) => value !== null && value !== undefined && Number.isFinite(Number(value));
+
       window.ReaderFlow = {
         setSpeed(value) {
           speed = Number(value) || 25;
@@ -310,17 +334,27 @@ enum ReaderWebAssets {
           post('progressChanged', progress());
         },
         scrollToHref(value) {
-          const href = String(value || '').split('#')[0];
-          if (!href) {
-            return;
-          }
-          const chapters = Array.from(document.querySelectorAll('.rf-chapter'));
-          const target = chapters.find((chapter) => chapter.dataset.normalizedHref === href || chapter.dataset.href === href);
+          const target = chapterForHref(value);
           if (!target) {
             return;
           }
           target.scrollIntoView({ block: 'start' });
           post('progressChanged', progress());
+        },
+        scrollToLocator(href, chapterProgression, fallbackProgress) {
+          const target = chapterForHref(href);
+          if (target && finiteNumber(chapterProgression)) {
+            scrollToChapterProgress(target, chapterProgression);
+            return;
+          }
+          if (target) {
+            target.scrollIntoView({ block: 'start' });
+            post('progressChanged', progress());
+            return;
+          }
+          if (finiteNumber(fallbackProgress)) {
+            this.scrollToProgress(fallbackProgress);
+          }
         },
         start() {
           if (!running) {
