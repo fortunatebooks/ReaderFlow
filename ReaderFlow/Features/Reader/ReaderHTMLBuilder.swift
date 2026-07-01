@@ -87,6 +87,7 @@ enum ReaderWebAssets {
       let running = false;
       let lastTime = null;
       let lastProgressPost = 0;
+      let touchStart = null;
 
       const progress = () => {
         const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
@@ -257,6 +258,39 @@ enum ReaderWebAssets {
         }
         post('readerTapped', {});
       });
+
+      document.addEventListener('touchstart', (event) => {
+        if (event.touches.length !== 1) {
+          touchStart = null;
+          return;
+        }
+        const touch = event.touches[0];
+        touchStart = { x: touch.clientX, y: touch.clientY };
+      }, { passive: true });
+
+      document.addEventListener('touchend', (event) => {
+        if (!touchStart || event.changedTouches.length !== 1) {
+          touchStart = null;
+          return;
+        }
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) {
+          touchStart = null;
+          return;
+        }
+
+        const touch = event.changedTouches[0];
+        const dx = touch.clientX - touchStart.x;
+        const dy = touch.clientY - touchStart.y;
+        touchStart = null;
+
+        if (Math.abs(dy) < 52 || Math.abs(dy) < Math.abs(dx) * 1.5) {
+          return;
+        }
+
+        event.preventDefault();
+        post('speedAdjustment', { delta: dy < 0 ? 5 : -5 });
+      }, { passive: false });
 
       window.ReaderFlow = {
         setSpeed(value) {

@@ -36,7 +36,8 @@ struct ReaderView: View {
                 onProgress: saveProgress,
                 onSelection: saveSelection,
                 onReady: readerDidBecomeReady,
-                onTap: toggleReaderPlayback
+                onTap: toggleReaderPlayback,
+                onSpeedAdjustment: adjustSpeed
             )
             .ignoresSafeArea()
 
@@ -226,6 +227,21 @@ struct ReaderView: View {
         withAnimation(.easeOut(duration: 0.2)) {
             isScrolling.toggle()
             showControls = !isScrolling
+        }
+    }
+
+    private func adjustSpeed(by delta: Double) {
+        let adjustedSpeed = min(120, max(5, speed + delta))
+        guard adjustedSpeed != speed else { return }
+        speed = adjustedSpeed
+        confirmationText = "Speed \(Int(adjustedSpeed))"
+        if activeSettings.hapticsEnabled {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if confirmationText?.hasPrefix("Speed ") == true {
+                confirmationText = nil
+            }
         }
     }
 
