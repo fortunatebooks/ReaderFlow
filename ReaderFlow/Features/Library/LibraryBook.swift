@@ -5,6 +5,7 @@ struct LibraryBook: Identifiable, Equatable {
     var title: String
     var author: String
     var progress: Double
+    var importedAt: Date
     var lastOpenedAt: Date?
 
     init(
@@ -12,12 +13,14 @@ struct LibraryBook: Identifiable, Equatable {
         title: String,
         author: String,
         progress: Double = 0,
+        importedAt: Date = .now,
         lastOpenedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
         self.author = author
         self.progress = progress
+        self.importedAt = importedAt
         self.lastOpenedAt = lastOpenedAt
     }
 }

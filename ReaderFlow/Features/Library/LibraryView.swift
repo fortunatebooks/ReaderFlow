@@ -8,12 +8,19 @@ struct LibraryView: View {
     @Query(sort: \ExcerptEntity.createdAt, order: .reverse) private var excerpts: [ExcerptEntity]
     @State private var showingImporter = false
     @State private var importError: String?
+    @State private var searchText = ""
+    @State private var sortMode: LibrarySortMode = .recent
 
     private var activeBooks: [BookEntity] {
         books.filter { !$0.isArchived }
-            .sorted { lhs, rhs in
-                (lhs.lastOpenedSortKey ?? lhs.importedAt) > (rhs.lastOpenedSortKey ?? rhs.importedAt)
-            }
+    }
+
+    private var visibleBooks: [BookEntity] {
+        LibraryBookListFilter.visibleBooks(
+            from: activeBooks,
+            searchText: searchText,
+            sortMode: sortMode
+        )
     }
 
     var body: some View {
@@ -21,11 +28,14 @@ struct LibraryView: View {
             Group {
                 if activeBooks.isEmpty {
                     emptyState
+                } else if visibleBooks.isEmpty {
+                    noMatchesState
                 } else {
                     bookList
                 }
             }
             .navigationTitle("ReaderFlow")
+            .searchable(text: $searchText, prompt: "Search books or authors")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     NavigationLink {
@@ -40,14 +50,23 @@ struct LibraryView: View {
                         Label("Archived", systemImage: "archivebox")
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Sort", selection: $sortMode) {
+                            ForEach(LibrarySortMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                    } label: {
+                        Label(sortMode.displayName, systemImage: "arrow.up.arrow.down")
+                    }
+
                     Button {
                         showingImporter = true
                     } label: {
                         Label("Import", systemImage: "plus")
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
+
                     NavigationLink {
                         SettingsView()
                     } label: {
@@ -89,25 +108,75 @@ struct LibraryView: View {
         }
     }
 
+    private var noMatchesState: some View {
+        ContentUnavailableView {
+            Label("No Matches", systemImage: "magnifyingglass")
+        } description: {
+            Text("No books match your search.")
+        }
+    }
+
     private var bookList: some View {
         List {
-            Section("Recent Books") {
-                ForEach(activeBooks) { book in
-                    NavigationLink {
-                        ReaderView(book: book)
-                    } label: {
-                        BookRow(book: book)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            archive(book)
-                        } label: {
-                            Label("Delete Local Copy", systemImage: "trash")
-                        }
-                    }
+            Section(sectionTitle) {
+                ForEach(visibleBooks) { book in
+                    bookRow(for: book)
                 }
             }
         }
+    }
+
+    private var sectionTitle: String {
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Search Results"
+        }
+        switch sortMode {
+        case .recent:
+            return "Recent Books"
+        case .title, .author, .imported:
+            return "All Books"
+        }
+    }
+
+    private func bookRow(for book: BookEntity) -> some View {
+        let bookExcerpts = excerpts(for: book)
+        return NavigationLink {
+            ReaderView(book: book)
+        } label: {
+            BookRow(book: book, excerptCount: bookExcerpts.count)
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) {
+                archive(book)
+            } label: {
+                Label("Delete Local Copy", systemImage: "trash")
+            }
+        }
+        .contextMenu {
+            ShareLink(
+                item: ExcerptTextExportFile.book(
+                    bookTitle: book.title,
+                    author: book.authorDisplay,
+                    excerpts: bookExcerpts
+                ),
+                preview: SharePreview(ExcerptTextExporter().bookExportFilename(bookTitle: book.title))
+            ) {
+                Label("Export Excerpts", systemImage: "square.and.arrow.up")
+            }
+            .disabled(bookExcerpts.isEmpty)
+
+            Button(role: .destructive) {
+                archive(book)
+            } label: {
+                Label("Delete Local Copy", systemImage: "trash")
+            }
+        }
+    }
+
+    private func excerpts(for book: BookEntity) -> [ExcerptEntity] {
+        excerpts
+            .filter { $0.bookId == book.id }
+            .sorted { $0.sortProgress < $1.sortProgress }
     }
 
     private var importErrorBinding: Binding<Bool> {
@@ -198,6 +267,7 @@ struct LibraryView: View {
 
 private struct BookRow: View {
     let book: BookEntity
+    let excerptCount: Int
 
     var body: some View {
         HStack(spacing: 12) {
@@ -213,9 +283,22 @@ private struct BookRow: View {
                     .lineLimit(1)
                 ProgressView(value: book.readingProgress)
                     .frame(maxWidth: 180)
+                HStack(spacing: 8) {
+                    Text("\(progressPercent)% read")
+                    if excerptCount > 0 {
+                        Text("·")
+                        Text("\(excerptCount) excerpt\(excerptCount == 1 ? "" : "s")")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var progressPercent: Int {
+        Int(min(1, max(0, book.readingProgress)) * 100)
     }
 }
 
