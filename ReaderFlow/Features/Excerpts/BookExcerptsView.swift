@@ -70,7 +70,7 @@ struct BookExcerptsView: View {
             .buttonStyle(.plain)
         } else if excerpt.sourceBookAvailable {
             NavigationLink {
-                ReaderView(book: book, initialPosition: excerpt.readerInitialPosition)
+                ReaderView(book: book, initialPosition: excerpt.readerInitialPosition, initialHighlightId: excerpt.id)
             } label: {
                 ExcerptRow(excerpt: excerpt)
             }
@@ -166,7 +166,7 @@ struct AllExcerptsView: View {
     private func excerptRow(_ excerpt: ExcerptEntity) -> some View {
         if excerpt.sourceBookAvailable, let book = availableBooksById[excerpt.bookId] {
             NavigationLink {
-                ReaderView(book: book, initialPosition: excerpt.readerInitialPosition)
+                ReaderView(book: book, initialPosition: excerpt.readerInitialPosition, initialHighlightId: excerpt.id)
             } label: {
                 ExcerptRow(excerpt: excerpt)
             }

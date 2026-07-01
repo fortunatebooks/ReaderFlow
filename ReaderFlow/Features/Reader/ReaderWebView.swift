@@ -29,6 +29,7 @@ struct ReaderNavigationRequest: Hashable {
     var fallbackProgress: Double?
     var scrollY: Double?
     var documentHeight: Double?
+    var highlightId: UUID?
 
     init(
         id: UUID,
@@ -36,7 +37,8 @@ struct ReaderNavigationRequest: Hashable {
         chapterProgression: Double? = nil,
         fallbackProgress: Double? = nil,
         scrollY: Double? = nil,
-        documentHeight: Double? = nil
+        documentHeight: Double? = nil,
+        highlightId: UUID? = nil
     ) {
         self.id = id
         self.href = href
@@ -44,6 +46,7 @@ struct ReaderNavigationRequest: Hashable {
         self.fallbackProgress = fallbackProgress
         self.scrollY = scrollY
         self.documentHeight = documentHeight
+        self.highlightId = highlightId
     }
 }
 
@@ -54,6 +57,7 @@ struct ReaderWebView: UIViewRepresentable {
     let bookResourceRootURL: URL?
     let initialProgress: Double
     let navigationRequest: ReaderNavigationRequest?
+    let highlights: [ReaderHighlightPayload]
     @Binding var speed: Double
     @Binding var isScrolling: Bool
     var onProgress: (ReaderProgressMessage) -> Void
@@ -62,6 +66,7 @@ struct ReaderWebView: UIViewRepresentable {
     var onTap: () -> Void
     var onSpeedAdjustment: (Double) -> Void
     var onScrollStateChanged: (ReaderScrollStateMessage) -> Void
+    var onNavigationApplied: (UUID) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -69,6 +74,7 @@ struct ReaderWebView: UIViewRepresentable {
             currentHTML: html,
             currentInitialProgress: initialProgress,
             currentNavigationRequest: navigationRequest,
+            currentHighlights: highlights,
             currentSpeed: speed,
             currentIsScrolling: isScrolling,
             onProgress: onProgress,
@@ -76,7 +82,8 @@ struct ReaderWebView: UIViewRepresentable {
             onReady: onReady,
             onTap: onTap,
             onSpeedAdjustment: onSpeedAdjustment,
-            onScrollStateChanged: onScrollStateChanged
+            onScrollStateChanged: onScrollStateChanged,
+            onNavigationApplied: onNavigationApplied
         )
     }
 
@@ -105,21 +112,26 @@ struct ReaderWebView: UIViewRepresentable {
         context.coordinator.onTap = onTap
         context.coordinator.onSpeedAdjustment = onSpeedAdjustment
         context.coordinator.onScrollStateChanged = onScrollStateChanged
+        context.coordinator.onNavigationApplied = onNavigationApplied
         context.coordinator.currentInitialProgress = initialProgress
         context.coordinator.currentNavigationRequest = navigationRequest
+        context.coordinator.currentHighlights = highlights
         context.coordinator.currentSpeed = speed
         context.coordinator.currentIsScrolling = isScrolling
         if context.coordinator.currentHTML != html {
             context.coordinator.currentHTML = html
             context.coordinator.isDocumentReady = false
             context.coordinator.hasAppliedInitialProgress = false
+            context.coordinator.appliedHighlightsSignature = nil
+            context.coordinator.appliedNavigationRequestID = nil
             webView.loadHTMLString(html, baseURL: nil)
             return
         }
 
         if context.coordinator.isDocumentReady {
-            context.coordinator.applyNavigationIfNeeded(to: webView)
             context.coordinator.applyReaderState(to: webView)
+            context.coordinator.applyHighlightsIfNeeded(to: webView)
+            context.coordinator.applyNavigationIfNeeded(to: webView)
         }
     }
 
@@ -128,7 +140,9 @@ struct ReaderWebView: UIViewRepresentable {
         var currentHTML: String
         var currentInitialProgress: Double
         var currentNavigationRequest: ReaderNavigationRequest?
+        var currentHighlights: [ReaderHighlightPayload]
         var appliedNavigationRequestID: UUID?
+        var appliedHighlightsSignature: String?
         var currentSpeed: Double
         var currentIsScrolling: Bool
         var isDocumentReady = false
@@ -139,12 +153,14 @@ struct ReaderWebView: UIViewRepresentable {
         var onTap: () -> Void
         var onSpeedAdjustment: (Double) -> Void
         var onScrollStateChanged: (ReaderScrollStateMessage) -> Void
+        var onNavigationApplied: (UUID) -> Void
 
         init(
             expectedBridgeToken: String,
             currentHTML: String,
             currentInitialProgress: Double,
             currentNavigationRequest: ReaderNavigationRequest?,
+            currentHighlights: [ReaderHighlightPayload],
             currentSpeed: Double,
             currentIsScrolling: Bool,
             onProgress: @escaping (ReaderProgressMessage) -> Void,
@@ -152,12 +168,14 @@ struct ReaderWebView: UIViewRepresentable {
             onReady: @escaping () -> Void,
             onTap: @escaping () -> Void,
             onSpeedAdjustment: @escaping (Double) -> Void,
-            onScrollStateChanged: @escaping (ReaderScrollStateMessage) -> Void
+            onScrollStateChanged: @escaping (ReaderScrollStateMessage) -> Void,
+            onNavigationApplied: @escaping (UUID) -> Void
         ) {
             self.expectedBridgeToken = expectedBridgeToken
             self.currentHTML = currentHTML
             self.currentInitialProgress = currentInitialProgress
             self.currentNavigationRequest = currentNavigationRequest
+            self.currentHighlights = currentHighlights
             self.currentSpeed = currentSpeed
             self.currentIsScrolling = currentIsScrolling
             self.onProgress = onProgress
@@ -166,6 +184,7 @@ struct ReaderWebView: UIViewRepresentable {
             self.onTap = onTap
             self.onSpeedAdjustment = onSpeedAdjustment
             self.onScrollStateChanged = onScrollStateChanged
+            self.onNavigationApplied = onNavigationApplied
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -216,6 +235,7 @@ struct ReaderWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isDocumentReady = true
             applyReaderState(to: webView)
+            applyHighlightsIfNeeded(to: webView)
             applyNavigationIfNeeded(to: webView)
         }
 
@@ -231,9 +251,32 @@ struct ReaderWebView: UIViewRepresentable {
             let fallbackProgress = boundedJavaScriptNumberLiteral(request.fallbackProgress)
             let scrollY = nonNegativeJavaScriptNumberLiteral(request.scrollY)
             let documentHeight = nonNegativeJavaScriptNumberLiteral(request.documentHeight)
+            let highlightID = javaScriptStringLiteral(request.highlightId?.uuidString ?? "")
             webView.evaluateJavaScript(
-                "window.ReaderFlow && window.ReaderFlow.scrollToLocator(\(hrefLiteral), \(chapterProgression), \(fallbackProgress), \(scrollY), \(documentHeight));"
+                """
+                if (window.ReaderFlow) {
+                  window.ReaderFlow.scrollToLocator(\(hrefLiteral), \(chapterProgression), \(fallbackProgress), \(scrollY), \(documentHeight));
+                  window.ReaderFlow.pulseHighlight(\(highlightID));
+                }
+                """
             )
+            DispatchQueue.main.async { [onNavigationApplied] in
+                onNavigationApplied(request.id)
+            }
+        }
+
+        func applyHighlightsIfNeeded(to webView: WKWebView) {
+            let signature = highlightsSignature(currentHighlights)
+            guard signature != appliedHighlightsSignature else {
+                return
+            }
+            appliedHighlightsSignature = signature
+            guard let data = try? JSONEncoder().encode(currentHighlights),
+                  let json = String(data: data, encoding: .utf8)
+            else {
+                return
+            }
+            webView.evaluateJavaScript("window.ReaderFlow && window.ReaderFlow.applyHighlights(\(json));")
         }
 
         func applyReaderState(to webView: WKWebView) {
@@ -280,6 +323,12 @@ struct ReaderWebView: UIViewRepresentable {
                 return "null"
             }
             return String(max(0, value))
+        }
+
+        private func highlightsSignature(_ highlights: [ReaderHighlightPayload]) -> String {
+            highlights
+                .map { "\($0.id.uuidString):\($0.locator.href):\($0.locator.totalProgression):\($0.selectedText):\($0.contextBefore):\($0.contextAfter):\($0.locator.textQuote?.prefix ?? ""):\($0.locator.textQuote?.suffix ?? "")" }
+                .joined(separator: "|")
         }
 
         private func decode<T: Decodable>(_ type: T.Type, from object: Any?) -> T? {

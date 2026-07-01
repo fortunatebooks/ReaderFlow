@@ -69,6 +69,15 @@ enum ReaderWebAssets {
       background: var(--rf-selection, rgba(255, 214, 94, 0.58));
       border-radius: 3px;
     }
+    .rf-highlight-pulse {
+      animation: readerflow-highlight-pulse 1.25s ease-out;
+      outline: 2px solid rgba(255, 184, 28, 0.92);
+      outline-offset: 2px;
+    }
+    @keyframes readerflow-highlight-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(255, 184, 28, 0.65); }
+      100% { box-shadow: 0 0 0 12px rgba(255, 184, 28, 0); }
+    }
     """
 
     static let javascript = """
@@ -91,6 +100,7 @@ enum ReaderWebAssets {
       let suppressClickUntil = 0;
       let programmaticScrollUntil = 0;
       let scrollProgressTimer = null;
+      let pendingPulseHighlightIds = new Set();
       const speedSwipeEdgeWidth = 84;
 
       const progress = () => {
@@ -277,7 +287,44 @@ enum ReaderWebAssets {
         return Math.max(0, Math.min(1, (selectionTop - chapterTop) / chapterHeight));
       };
 
-      const markSelection = (range, highlightId) => {
+      const highlightElement = (highlightId) => {
+        const id = String(highlightId || '');
+        if (!id) {
+          return null;
+        }
+        return Array.from(document.querySelectorAll('.rf-highlight'))
+          .find((element) => element.dataset && element.dataset.highlightId === id) || null;
+      };
+
+      const removeHighlightElement = (element) => {
+        try {
+          const parent = element.parentNode;
+          if (!parent) {
+            element.remove();
+            return;
+          }
+          while (element.firstChild) {
+            parent.insertBefore(element.firstChild, element);
+          }
+          element.remove();
+          parent.normalize();
+        } catch (_) {
+          if (element.remove) {
+            element.remove();
+          }
+        }
+      };
+
+      const syncHighlightElements = (highlightIds) => {
+        Array.from(document.querySelectorAll('.rf-highlight')).forEach((element) => {
+          const id = element.dataset && element.dataset.highlightId;
+          if (id && !highlightIds.has(id)) {
+            removeHighlightElement(element);
+          }
+        });
+      };
+
+      const wrapRangeInHighlight = (range, highlightId) => {
         try {
           const marker = document.createElement('mark');
           marker.className = 'rf-highlight';
@@ -287,6 +334,159 @@ enum ReaderWebAssets {
         } catch (_) {
           return false;
         }
+      };
+
+      const markRange = (range, highlightId) => {
+        if (highlightElement(highlightId)) {
+          return true;
+        }
+        if (wrapRangeInHighlight(range, highlightId)) {
+          return true;
+        }
+        try {
+          const marker = document.createElement('mark');
+          marker.className = 'rf-highlight';
+          marker.dataset.highlightId = highlightId;
+          const contents = range.extractContents();
+          marker.appendChild(contents);
+          range.insertNode(marker);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      };
+
+      const markSelection = (range, highlightId) => markRange(range, highlightId);
+
+      const textNodesIn = (root) => {
+        const nodes = [];
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node) {
+          if (node.nodeValue && node.nodeValue.trim().length > 0) {
+            nodes.push(node);
+          }
+          node = walker.nextNode();
+        }
+        return nodes;
+      };
+
+      const normalizeQuoteText = (value) => String(value || '').replace(/[\\s\\u00a0]+/g, ' ').trim();
+
+      const normalizedSegments = (nodes) => {
+        let normalizedText = '';
+        const offsetMap = [];
+        const segments = [];
+        let rawOffset = 0;
+
+        nodes.forEach((node) => {
+          const text = node.nodeValue || '';
+          const segment = { node, text, start: rawOffset };
+          segments.push(segment);
+          for (let index = 0; index < text.length; index += 1) {
+            const character = text[index];
+            const isWhitespace = /[\\s\\u00a0]/.test(character);
+            if (isWhitespace) {
+              if (normalizedText.length > 0 && !normalizedText.endsWith(' ')) {
+                normalizedText += ' ';
+                offsetMap.push(rawOffset + index);
+              }
+            } else {
+              normalizedText += character;
+              offsetMap.push(rawOffset + index);
+            }
+          }
+          rawOffset += text.length;
+        });
+
+        while (normalizedText.endsWith(' ')) {
+          normalizedText = normalizedText.slice(0, -1);
+          offsetMap.pop();
+        }
+        return { normalizedText, offsetMap, segments };
+      };
+
+      const locateTextOffset = (segments, offset) => {
+        for (const segment of segments) {
+          const localOffset = offset - segment.start;
+          if (localOffset >= 0 && localOffset <= segment.text.length) {
+            return { node: segment.node, offset: localOffset };
+          }
+        }
+        const last = segments[segments.length - 1];
+        return last ? { node: last.node, offset: last.text.length } : null;
+      };
+
+      const rangeForTextQuote = (chapter, exact, prefix, suffix) => {
+        const text = normalizeQuoteText(exact);
+        if (!chapter || text.length < 2) {
+          return null;
+        }
+        const nodes = textNodesIn(chapter);
+        const { normalizedText, offsetMap, segments } = normalizedSegments(nodes);
+        const fullText = normalizedText;
+        if (!fullText || segments.length === 0) {
+          return null;
+        }
+
+        const trimmedPrefix = normalizeQuoteText(prefix);
+        const trimmedSuffix = normalizeQuoteText(suffix);
+        const hasContext = trimmedPrefix.length > 0 || trimmedSuffix.length > 0;
+        let best = null;
+        let searchFrom = 0;
+        while (searchFrom < fullText.length) {
+          const start = fullText.indexOf(text, searchFrom);
+          if (start < 0) {
+            break;
+          }
+          const end = start + text.length;
+          const before = fullText.slice(Math.max(0, start - Math.max(80, trimmedPrefix.length)), start).trim();
+          const after = fullText.slice(end, end + Math.max(80, trimmedSuffix.length)).trim();
+          let score = 0;
+          if (trimmedPrefix && before.endsWith(trimmedPrefix)) {
+            score += 2;
+          }
+          if (trimmedSuffix && after.startsWith(trimmedSuffix)) {
+            score += 2;
+          }
+          if (!best || score > best.score) {
+            best = { start, end, score };
+          }
+          if (score >= 4) {
+            break;
+          }
+          searchFrom = start + Math.max(1, text.length);
+        }
+
+        if (!best || (hasContext && best.score === 0)) {
+          return null;
+        }
+        const rawStart = offsetMap[best.start];
+        const rawEnd = (offsetMap[best.end - 1] ?? rawStart) + 1;
+        const startPosition = locateTextOffset(segments, rawStart);
+        const endPosition = locateTextOffset(segments, rawEnd);
+        if (!startPosition || !endPosition) {
+          return null;
+        }
+        const range = document.createRange();
+        range.setStart(startPosition.node, startPosition.offset);
+        range.setEnd(endPosition.node, endPosition.offset);
+        return range;
+      };
+
+      const applyHighlight = (highlight) => {
+        if (!highlight || !highlight.id || highlightElement(highlight.id)) {
+          return false;
+        }
+        const locator = highlight.locator || {};
+        const chapter = chapterForHref(locator.href) || document.querySelector('.rf-chapter');
+        const range = rangeForTextQuote(
+          chapter,
+          highlight.selectedText,
+          highlight.contextBefore || (locator.textQuote && locator.textQuote.prefix),
+          highlight.contextAfter || (locator.textQuote && locator.textQuote.suffix)
+        );
+        return range ? markRange(range, highlight.id) : false;
       };
 
       const selectionPayload = () => {
@@ -498,6 +698,39 @@ enum ReaderWebAssets {
           if (finiteNumber(fallbackProgress)) {
             this.scrollToProgress(fallbackProgress);
           }
+        },
+        applyHighlights(highlights) {
+          if (!Array.isArray(highlights)) {
+            return;
+          }
+          const highlightIds = new Set(highlights.map((highlight) => String(highlight && highlight.id || '')).filter(Boolean));
+          syncHighlightElements(highlightIds);
+          highlights.forEach(applyHighlight);
+          Array.from(pendingPulseHighlightIds).forEach((highlightId) => {
+            if (this.pulseHighlight(highlightId)) {
+              pendingPulseHighlightIds.delete(highlightId);
+            }
+          });
+        },
+        pulseHighlight(highlightId) {
+          const element = highlightElement(highlightId);
+          if (!element) {
+            const id = String(highlightId || '');
+            if (id) {
+              pendingPulseHighlightIds.add(id);
+            }
+            return false;
+          }
+          const rect = element.getBoundingClientRect();
+          const target = window.scrollY + rect.top - Math.max(1, window.innerHeight || 1) * 0.42;
+          scrollToY(target);
+          element.classList.remove('rf-highlight-pulse');
+          void element.offsetWidth;
+          element.classList.add('rf-highlight-pulse');
+          setTimeout(() => {
+            element.classList.remove('rf-highlight-pulse');
+          }, 1300);
+          return true;
         },
         start() {
           if (!running) {

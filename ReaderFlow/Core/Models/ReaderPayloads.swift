@@ -86,3 +86,11 @@ struct ReaderSelectionPayload: Codable, Hashable {
     var contextAfter: String
     var locator: ReaderLocator
 }
+
+struct ReaderHighlightPayload: Codable, Hashable, Identifiable {
+    var id: UUID
+    var selectedText: String
+    var contextBefore: String
+    var contextAfter: String
+    var locator: ReaderLocator
+}

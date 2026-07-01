@@ -18,4 +18,21 @@ extension ExcerptEntity {
         }
         return ReaderInitialPosition(progress: sortProgress)
     }
+
+    func readerHighlightPayload(expectedBookId: UUID, expectedBookFingerprint: String) -> ReaderHighlightPayload? {
+        guard let locator = readerLocator,
+              locator.bookId == expectedBookId,
+              locator.bookFingerprint == expectedBookFingerprint,
+              !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+        return ReaderHighlightPayload(
+            id: id,
+            selectedText: selectedText,
+            contextBefore: contextBefore,
+            contextAfter: contextAfter,
+            locator: locator
+        )
+    }
 }

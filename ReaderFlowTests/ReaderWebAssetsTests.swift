@@ -12,6 +12,8 @@ struct ReaderWebAssetsTests {
         #expect(javascript.contains("speedSwipeEdgeWidth"))
         #expect(javascript.contains("isRightEdgeTouch"))
         #expect(javascript.contains("reason: 'end'"))
+        #expect(javascript.contains("applyHighlights"))
+        #expect(javascript.contains("pulseHighlight"))
     }
 
     @Test func readerScriptMarksRestoreAndNavigationScrollsAsProgrammatic() {
@@ -95,6 +97,159 @@ struct ReaderWebAssetsTests {
         try harness.evaluate("window.ReaderFlow.scrollToLocator('Text/chapter2.xhtml', 0.5, 0.1, 700, 1000);")
 
         #expect(try harness.int("window.scrollY") == 1390)
+    }
+
+    @Test func applyHighlightsMarksSavedExcerptByTextAndContext() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            window.ReaderFlow.applyHighlights([{
+              id: 'highlight-1',
+              selectedText: 'saved passage',
+              contextBefore: 'Intro',
+              contextAfter: 'outro',
+              locator: { href: 'Text/chapter1.xhtml' }
+            }]);
+            """
+        )
+
+        #expect(try harness.int("highlightElements.length") == 1)
+        #expect(try harness.string("highlightElements[0].dataset.highlightId") == "highlight-1")
+    }
+
+    @Test func applyHighlightsMatchesCollapsedWhitespace() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            window.ReaderFlow.applyHighlights([{
+              id: 'highlight-1',
+              selectedText: 'saved passage',
+              contextBefore: 'Intro',
+              contextAfter: 'outro',
+              locator: { href: 'Text/chapter1.xhtml' }
+            }]);
+            """
+        )
+
+        #expect(try harness.int("highlightElements.length") == 1)
+        #expect(try harness.string("highlightElements[0].text").contains("saved"))
+    }
+
+    @Test func applyHighlightsDoesNotMarkAmbiguousTextWithoutMatchingContext() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            window.ReaderFlow.applyHighlights([{
+              id: 'highlight-1',
+              selectedText: 'saved passage',
+              contextBefore: 'Missing prefix',
+              contextAfter: 'Missing suffix',
+              locator: { href: 'Text/chapter1.xhtml' }
+            }]);
+            """
+        )
+
+        #expect(try harness.int("highlightElements.length") == 0)
+    }
+
+    @Test func applyHighlightsSkipsAlreadyMarkedExcerpt() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            const savedHighlight = {
+              id: 'highlight-1',
+              selectedText: 'saved passage',
+              contextBefore: 'Intro',
+              contextAfter: 'outro',
+              locator: { href: 'Text/chapter1.xhtml' }
+            };
+            window.ReaderFlow.applyHighlights([savedHighlight]);
+            window.ReaderFlow.applyHighlights([savedHighlight]);
+            """
+        )
+
+        #expect(try harness.int("highlightElements.length") == 1)
+    }
+
+    @Test func applyHighlightsRemovesDeletedExcerptMarks() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            window.ReaderFlow.applyHighlights([
+              {
+                id: 'highlight-1',
+                selectedText: 'saved passage',
+                contextBefore: 'Intro',
+                contextAfter: 'outro',
+                locator: { href: 'Text/chapter1.xhtml' }
+              },
+              {
+                id: 'highlight-2',
+                selectedText: 'Second chapter',
+                contextBefore: '',
+                contextAfter: 'text',
+                locator: { href: 'Text/chapter2.xhtml' }
+              }
+            ]);
+            window.ReaderFlow.applyHighlights([{
+              id: 'highlight-2',
+              selectedText: 'Second chapter',
+              contextBefore: '',
+              contextAfter: 'text',
+              locator: { href: 'Text/chapter2.xhtml' }
+            }]);
+            """
+        )
+
+        #expect(try harness.int("highlightElements.length") == 1)
+        #expect(try harness.string("highlightElements[0].dataset.highlightId") == "highlight-2")
+    }
+
+    @Test func pulseHighlightScrollsAndAddsPulseClass() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            window.ReaderFlow.applyHighlights([{
+              id: 'highlight-1',
+              selectedText: 'saved passage',
+              contextBefore: 'Intro',
+              contextAfter: 'outro',
+              locator: { href: 'Text/chapter1.xhtml' }
+            }]);
+            var didPulse = window.ReaderFlow.pulseHighlight('highlight-1');
+            """
+        )
+
+        #expect(try harness.bool("didPulse"))
+        #expect(try harness.int("window.scrollY") == 90)
+        #expect(try harness.bool("highlightElements[0].classList.contains('rf-highlight-pulse')"))
+        #expect(try harness.int(manualPauseCountExpression) == 0)
+    }
+
+    @Test func pendingPulseRetriesAfterHighlightIsApplied() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            var firstPulse = window.ReaderFlow.pulseHighlight('highlight-1');
+            window.ReaderFlow.applyHighlights([{
+              id: 'highlight-1',
+              selectedText: 'saved passage',
+              contextBefore: 'Intro',
+              contextAfter: 'outro',
+              locator: { href: 'Text/chapter1.xhtml' }
+            }]);
+            """
+        )
+
+        #expect(try !harness.bool("firstPulse"))
+        #expect(try harness.bool("highlightElements[0].classList.contains('rf-highlight-pulse')"))
     }
 
     @Test func manualScrollWhileRunningPausesAndDebouncesProgress() throws {
@@ -201,6 +356,7 @@ private final class ReaderScriptHarness {
     private static let stubScript = """
     var messages = [];
     var listeners = { document: {}, window: {} };
+    var highlightElements = [];
     var now = 0;
     var timerId = 0;
     var timers = {};
@@ -229,20 +385,32 @@ private final class ReaderScriptHarness {
         listeners.window[type](event || {});
       }
     }
+    function makeClassList(element) {
+      return {
+        values: {},
+        add: function(value) { this.values[value] = true; },
+        remove: function(value) { delete this.values[value]; },
+        contains: function(value) { return this.values[value] === true; }
+      };
+    }
     var chapters = [
       {
         dataset: { spineIndex: '0', href: 'Text/chapter1.xhtml', normalizedHref: 'OPS/Text/chapter1.xhtml', title: 'Chapter 1' },
         scrollHeight: 1000,
+        textNodes: [{ nodeValue: 'Intro saved\\u00a0   passage outro. Another saved passage elsewhere.' }],
         getBoundingClientRect: function() { return { top: 0 - window.scrollY, height: 1000 }; },
         closest: function(selector) { return selector === '.rf-chapter' ? this : null; }
       },
       {
         dataset: { spineIndex: '1', href: 'Text/chapter2.xhtml', normalizedHref: 'OPS/Text/chapter2.xhtml', title: 'Chapter 2' },
         scrollHeight: 1000,
+        textNodes: [{ nodeValue: 'Second chapter text.' }],
         getBoundingClientRect: function() { return { top: 1000 - window.scrollY, height: 1000 }; },
         closest: function(selector) { return selector === '.rf-chapter' ? this : null; }
       }
     ];
+    chapters[0].textNodes[0].parentElement = chapters[0];
+    chapters[1].textNodes[0].parentElement = chapters[1];
     var window = {
       __readerFlowBridgeToken: 'test-token',
       __readerFlowBookId: '00000000-0000-0000-0000-000000000000',
@@ -297,22 +465,76 @@ private final class ReaderScriptHarness {
         listeners.document[type] = handler;
       },
       querySelectorAll: function(selector) {
-        return selector === '.rf-chapter' ? chapters : [];
+        if (selector === '.rf-chapter') {
+          return chapters;
+        }
+        if (selector === '.rf-highlight') {
+          return highlightElements;
+        }
+        return [];
       },
       querySelector: function(selector) {
         return selector === '.rf-chapter' ? chapters[0] : null;
       },
-      createElement: function() { return {}; },
+      createElement: function() {
+        const element = {
+          className: '',
+          dataset: {},
+          classList: null,
+          appendChild: function() {},
+          parentNode: null,
+          firstChild: null,
+          getBoundingClientRect: function() { return { top: 300 - window.scrollY, height: 20 }; },
+          remove: function() {
+            const index = highlightElements.indexOf(this);
+            if (index >= 0) {
+              highlightElements.splice(index, 1);
+            }
+          },
+          offsetWidth: 1
+        };
+        element.classList = makeClassList(element);
+        return element;
+      },
+      createTreeWalker: function(root) {
+        const nodes = root && root.textNodes ? root.textNodes : [];
+        var index = 0;
+        return {
+          nextNode: function() {
+            if (index >= nodes.length) {
+              return null;
+            }
+            const node = nodes[index];
+            index += 1;
+            return node;
+          }
+        };
+      },
       createRange: function() {
         return {
+          startNode: null,
+          startOffset: 0,
+          endNode: null,
+          endOffset: 0,
           selectNodeContents: function() {},
-          setEnd: function() {},
-          setStart: function() {},
+          setEnd: function(node, offset) { this.endNode = node; this.endOffset = offset; },
+          setStart: function(node, offset) { this.startNode = node; this.startOffset = offset; },
+          surroundContents: function(marker) {
+            marker.text = this.startNode.nodeValue.slice(this.startOffset, this.endOffset);
+            marker.parentNode = {
+              insertBefore: function() {},
+              normalize: function() {}
+            };
+            highlightElements.push(marker);
+          },
+          extractContents: function() { return {}; },
+          insertNode: function(marker) { highlightElements.push(marker); },
           toString: function() { return ''; }
         };
       }
     };
     var Node = { TEXT_NODE: 3 };
+    var NodeFilter = { SHOW_TEXT: 4 };
     """
 }
 

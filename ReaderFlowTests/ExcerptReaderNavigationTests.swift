@@ -39,6 +39,79 @@ struct ExcerptReaderNavigationTests {
         #expect(abs(excerpt.readerJumpProgress - 0.58) < 0.0001)
     }
 
+    @Test func buildsHighlightPayloadForMatchingBookExcerpt() throws {
+        let bookId = UUID()
+        let locator = ReaderLocator(
+            bookId: bookId,
+            bookFingerprint: "fingerprint",
+            spineIndex: 1,
+            href: "chapter2.xhtml",
+            chapterTitle: "Chapter 2",
+            chapterProgression: 0.25,
+            totalProgression: 0.4,
+            scrollY: 800,
+            documentHeight: 2400,
+            textQuote: TextQuoteSelector(
+                exact: "Selected text",
+                prefix: "before",
+                suffix: "after",
+                normalizedStartOffset: nil,
+                normalizedEndOffset: nil
+            ),
+            domTextPath: nil,
+            contentHash: nil,
+            readiumLocatorJSON: nil,
+            createdAt: Date(timeIntervalSinceReferenceDate: 100)
+        )
+        let excerpt = try ExcerptEntity(
+            id: UUID(uuidString: "99999999-9999-9999-9999-999999999999") ?? UUID(),
+            bookId: bookId,
+            bookTitleSnapshot: "Book",
+            authorDisplaySnapshot: "Author",
+            selectedText: "Selected text",
+            contextBefore: "before",
+            contextAfter: "after",
+            locatorJSON: JSONEncoder().encode(locator),
+            sortProgress: 0.4
+        )
+
+        let payload = try #require(excerpt.readerHighlightPayload(expectedBookId: bookId, expectedBookFingerprint: "fingerprint"))
+
+        #expect(payload.id == excerpt.id)
+        #expect(payload.selectedText == "Selected text")
+        #expect(payload.locator.href == "chapter2.xhtml")
+    }
+
+    @Test func rejectsHighlightPayloadForMismatchedBookFingerprint() throws {
+        let bookId = UUID()
+        let locator = ReaderLocator(
+            bookId: bookId,
+            bookFingerprint: "old-fingerprint",
+            spineIndex: 1,
+            href: "chapter2.xhtml",
+            chapterTitle: "Chapter 2",
+            chapterProgression: 0.25,
+            totalProgression: 0.4,
+            scrollY: 800,
+            documentHeight: 2400,
+            textQuote: nil,
+            domTextPath: nil,
+            contentHash: nil,
+            readiumLocatorJSON: nil,
+            createdAt: Date(timeIntervalSinceReferenceDate: 100)
+        )
+        let excerpt = try ExcerptEntity(
+            bookId: bookId,
+            bookTitleSnapshot: "Book",
+            authorDisplaySnapshot: "Author",
+            selectedText: "Selected text",
+            locatorJSON: JSONEncoder().encode(locator),
+            sortProgress: 0.4
+        )
+
+        #expect(excerpt.readerHighlightPayload(expectedBookId: bookId, expectedBookFingerprint: "new-fingerprint") == nil)
+    }
+
     @Test func fallsBackToBoundedSortProgressWhenLocatorIsMissing() {
         let highExcerpt = ExcerptEntity(
             bookId: UUID(),

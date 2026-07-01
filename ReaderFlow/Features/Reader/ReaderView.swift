@@ -5,18 +5,21 @@ import UIKit
 struct ReaderView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var settings: [ReaderSettingsEntity]
+    @Query(sort: \ExcerptEntity.sortProgress) private var excerpts: [ExcerptEntity]
     let book: BookEntity
     let initialPosition: ReaderInitialPosition?
-    let initialNavigationRequest: ReaderNavigationRequest?
+    let initialHighlightId: UUID?
     let initialProgressValue: Double
 
-    init(book: BookEntity, initialPosition: ReaderInitialPosition? = nil) {
+    @State private var pendingInitialNavigationRequest: ReaderNavigationRequest?
+    init(book: BookEntity, initialPosition: ReaderInitialPosition? = nil, initialHighlightId: UUID? = nil) {
         self.book = book
         self.initialPosition = initialPosition
+        self.initialHighlightId = initialHighlightId
         let restorePosition = initialPosition ?? book.readerInitialPosition
-        initialNavigationRequest = restorePosition.map {
-            ReaderNavigationRequest(id: UUID(), position: $0)
-        }
+        _pendingInitialNavigationRequest = State(initialValue: restorePosition.map {
+            ReaderNavigationRequest(id: UUID(), position: $0, highlightId: initialHighlightId)
+        })
         initialProgressValue = restorePosition?.progress ?? book.readingProgress
     }
 
@@ -48,6 +51,7 @@ struct ReaderView: View {
                 bookResourceRootURL: bookResourceRootURL,
                 initialProgress: effectiveInitialProgress,
                 navigationRequest: readerHTML == nil ? nil : effectiveNavigationRequest,
+                highlights: readerHighlightPayloads,
                 speed: $speed,
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
@@ -55,7 +59,8 @@ struct ReaderView: View {
                 onReady: readerDidBecomeReady,
                 onTap: toggleReaderPlayback,
                 onSpeedAdjustment: adjustSpeed,
-                onScrollStateChanged: readerScrollStateChanged
+                onScrollStateChanged: readerScrollStateChanged,
+                onNavigationApplied: readerNavigationApplied
             )
             .ignoresSafeArea()
 
@@ -196,7 +201,7 @@ struct ReaderView: View {
 
     private var effectiveNavigationRequest: ReaderNavigationRequest? {
         navigationRequest
-            ?? initialNavigationRequest
+            ?? pendingInitialNavigationRequest
     }
 
     private var tableOfContentsEntries: [TableOfContentsEntry] {
@@ -206,6 +211,18 @@ struct ReaderView: View {
             return []
         }
         return payload.entries
+    }
+
+    private var readerHighlightPayloads: [ReaderHighlightPayload] {
+        excerpts.compactMap { excerpt in
+            guard excerpt.bookId == book.id else {
+                return nil
+            }
+            return excerpt.readerHighlightPayload(
+                expectedBookId: book.id,
+                expectedBookFingerprint: book.contentFingerprint
+            )
+        }
     }
 
     @MainActor
@@ -358,13 +375,23 @@ struct ReaderView: View {
         showControls = true
         navigationRequest = ReaderNavigationRequest(
             id: UUID(),
-            position: position
+            position: position,
+            highlightId: excerpt.id
         )
         confirmationText = "Excerpt location"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             if confirmationText == "Excerpt location" {
                 confirmationText = nil
             }
+        }
+    }
+
+    private func readerNavigationApplied(_ requestID: UUID) {
+        if pendingInitialNavigationRequest?.id == requestID {
+            pendingInitialNavigationRequest = nil
+        }
+        if navigationRequest?.id == requestID {
+            navigationRequest = nil
         }
     }
 
@@ -476,14 +503,15 @@ private enum ReaderDocumentLoadError: LocalizedError {
 }
 
 private extension ReaderNavigationRequest {
-    init(id: UUID, position: ReaderInitialPosition) {
+    init(id: UUID, position: ReaderInitialPosition, highlightId: UUID? = nil) {
         self.init(
             id: id,
             href: position.href,
             chapterProgression: position.chapterProgression,
             fallbackProgress: position.progress,
             scrollY: position.scrollY,
-            documentHeight: position.documentHeight
+            documentHeight: position.documentHeight,
+            highlightId: highlightId
         )
     }
 }
