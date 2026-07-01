@@ -190,12 +190,14 @@ private extension ReaderFontFamily {
             "ui-serif, Georgia, \"Times New Roman\", serif"
         case .systemSans:
             "-apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Helvetica Neue\", sans-serif"
-        case .atkinsonHyperlegible:
-            "\"Atkinson Hyperlegible\", \"Avenir Next\", -apple-system, BlinkMacSystemFont, sans-serif"
-        case .literata:
-            "\"Literata\", Charter, Georgia, \"Times New Roman\", serif"
-        case .sourceSerif4:
-            "\"Source Serif 4\", Charter, Georgia, \"Times New Roman\", serif"
+        case .georgia:
+            "Georgia, \"Times New Roman\", ui-serif, serif"
+        case .palatino:
+            "Palatino, \"Palatino Linotype\", Georgia, ui-serif, serif"
+        case .avenirNext:
+            "\"Avenir Next\", Avenir, -apple-system, BlinkMacSystemFont, sans-serif"
+        case .monospaced:
+            "ui-monospace, \"SF Mono\", Menlo, Consolas, monospace"
         }
     }
 }
