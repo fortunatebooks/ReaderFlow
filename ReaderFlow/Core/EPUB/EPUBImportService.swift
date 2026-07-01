@@ -30,14 +30,16 @@ struct EPUBImportService {
             }
         }
 
+        let importId = UUID()
         let bookId = UUID()
+        var didPromoteStagedBook = false
         do {
             let sourceSize = try fileSize(at: sourceURL)
             guard sourceSize <= preflightLimits.maximumCompressedSizeBytes else {
                 throw EPUBImportError.tooLarge
             }
 
-            let copiedURL = try fileStore.copyEPUB(from: sourceURL, bookId: bookId)
+            let copiedURL = try fileStore.copyEPUBToStaging(from: sourceURL, importId: importId)
             let fingerprint = try sha256HexDigest(for: copiedURL)
 
             guard !knownFingerprints.contains(fingerprint) else {
@@ -52,7 +54,7 @@ struct EPUBImportService {
                 throw EPUBImportError.protectedPublication
             }
 
-            let expandedURL = try fileStore.expandedDirectory(for: bookId)
+            let expandedURL = try fileStore.stagedExpandedDirectory(for: importId)
             let expandedArchive = try await archiveExpander.expandArchive(at: copiedURL, to: expandedURL)
             guard !EPUBUnsupportedPublicationDetector.hasProtectedResources(in: expandedArchive.rootURL) else {
                 throw EPUBImportError.protectedPublication
@@ -71,6 +73,9 @@ struct EPUBImportService {
                 package: package
             )) ?? []
 
+            try fileStore.promoteStagedBook(importId: importId, bookId: bookId)
+            didPromoteStagedBook = true
+
             return ImportedEPUBDraft(
                 id: bookId,
                 title: package.metadata.title ?? sourceURL.deletingPathExtension().lastPathComponent,
@@ -88,7 +93,10 @@ struct EPUBImportService {
                 contentFingerprint: fingerprint
             )
         } catch {
-            try? fileStore.removeBookFiles(bookId: bookId)
+            try? fileStore.removeStagedImport(importId: importId)
+            if didPromoteStagedBook {
+                try? fileStore.removeBookFiles(bookId: bookId)
+            }
             throw error
         }
     }

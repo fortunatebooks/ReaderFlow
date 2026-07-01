@@ -1,6 +1,8 @@
 import Foundation
 
 enum AppFileStoreError: Error {
+    case bookDirectoryAlreadyExists
+    case missingStagedImport
     case unsafeExportFileName
 }
 
@@ -22,6 +24,7 @@ struct AppFileStore {
         try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: booksURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: exportsURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: stagingURL, withIntermediateDirectories: true)
     }
 
     var booksURL: URL {
@@ -30,6 +33,10 @@ struct AppFileStore {
 
     var exportsURL: URL {
         rootURL.appending(path: "Exports", directoryHint: .isDirectory)
+    }
+
+    var stagingURL: URL {
+        rootURL.appending(path: "Staging", directoryHint: .isDirectory)
     }
 
     func directory(for bookId: UUID, fileManager: FileManager = .default) throws -> URL {
@@ -47,12 +54,50 @@ struct AppFileStore {
         return destination
     }
 
+    func stagingDirectory(for importId: UUID, fileManager: FileManager = .default) throws -> URL {
+        let url = stagingURL.appending(path: importId.uuidString, directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func copyEPUBToStaging(from sourceURL: URL, importId: UUID, fileManager: FileManager = .default) throws -> URL {
+        let destination = try stagingDirectory(for: importId, fileManager: fileManager).appending(path: "source.epub")
+        if fileManager.fileExists(atPath: destination.path) {
+            try fileManager.removeItem(at: destination)
+        }
+        try fileManager.copyItem(at: sourceURL, to: destination)
+        return destination
+    }
+
+    func stagedExpandedDirectory(for importId: UUID, fileManager: FileManager = .default) throws -> URL {
+        try stagingDirectory(for: importId, fileManager: fileManager).appending(path: "expanded", directoryHint: .isDirectory)
+    }
+
+    func promoteStagedBook(importId: UUID, bookId: UUID, fileManager: FileManager = .default) throws -> URL {
+        let stagedDirectory = stagingURL.appending(path: importId.uuidString, directoryHint: .isDirectory)
+        guard fileManager.fileExists(atPath: stagedDirectory.path) else {
+            throw AppFileStoreError.missingStagedImport
+        }
+        let destination = booksURL.appending(path: bookId.uuidString, directoryHint: .isDirectory)
+        guard !fileManager.fileExists(atPath: destination.path) else {
+            throw AppFileStoreError.bookDirectoryAlreadyExists
+        }
+        try fileManager.moveItem(at: stagedDirectory, to: destination)
+        return destination
+    }
+
     func expandedDirectory(for bookId: UUID, fileManager: FileManager = .default) throws -> URL {
         try directory(for: bookId, fileManager: fileManager).appending(path: "expanded", directoryHint: .isDirectory)
     }
 
     func removeBookFiles(bookId: UUID, fileManager: FileManager = .default) throws {
         let url = booksURL.appending(path: bookId.uuidString, directoryHint: .isDirectory)
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        try fileManager.removeItem(at: url)
+    }
+
+    func removeStagedImport(importId: UUID, fileManager: FileManager = .default) throws {
+        let url = stagingURL.appending(path: importId.uuidString, directoryHint: .isDirectory)
         guard fileManager.fileExists(atPath: url.path) else { return }
         try fileManager.removeItem(at: url)
     }
