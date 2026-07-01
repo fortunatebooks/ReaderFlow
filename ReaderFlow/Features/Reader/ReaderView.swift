@@ -26,6 +26,7 @@ struct ReaderView: View {
             ReaderWebView(
                 html: ReaderHTMLBuilder.placeholderHTML(book: book, settings: activeSettings, bridgeToken: bridgeToken),
                 expectedBridgeToken: bridgeToken,
+                bookResourceRootURL: bookResourceRootURL,
                 speed: $speed,
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
@@ -102,6 +103,13 @@ struct ReaderView: View {
         }
         .padding(14)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var bookResourceRootURL: URL? {
+        guard let store = try? AppFileStore() else { return nil }
+        return store.booksURL
+            .appending(path: book.id.uuidString, directoryHint: .isDirectory)
+            .appending(path: "expanded", directoryHint: .isDirectory)
     }
 
     private func ensureSettings() {

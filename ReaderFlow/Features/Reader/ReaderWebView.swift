@@ -11,6 +11,7 @@ struct ReaderProgressMessage: Decodable, Hashable {
 struct ReaderWebView: UIViewRepresentable {
     let html: String
     let expectedBridgeToken: String
+    let bookResourceRootURL: URL?
     @Binding var speed: Double
     @Binding var isScrolling: Bool
     var onProgress: (ReaderProgressMessage) -> Void
@@ -23,6 +24,10 @@ struct ReaderWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = false
+        configuration.setURLSchemeHandler(
+            ReaderResourceSchemeHandler(bookResourceRootURL: bookResourceRootURL),
+            forURLScheme: "readerflow"
+        )
         configuration.userContentController.add(context.coordinator, name: "readerFlow")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
