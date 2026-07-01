@@ -83,6 +83,43 @@ struct ArchivedExcerptsView: View {
     }
 }
 
+struct AllExcerptsView: View {
+    @Query(sort: \ExcerptEntity.createdAt, order: .reverse) private var excerpts: [ExcerptEntity]
+
+    private var excerptGroups: [(title: String, excerpts: [ExcerptEntity])] {
+        Dictionary(grouping: excerpts, by: \.bookTitleSnapshot)
+            .map { title, excerpts in
+                (title, excerpts.sorted { $0.sortProgress < $1.sortProgress })
+            }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    var body: some View {
+        List {
+            if excerptGroups.isEmpty {
+                ContentUnavailableView("No Excerpts", systemImage: "text.quote", description: Text("Saved passages from your books will appear here."))
+            } else {
+                ForEach(excerptGroups, id: \.title) { group in
+                    Section(group.title) {
+                        ForEach(group.excerpts) { excerpt in
+                            ExcerptRow(excerpt: excerpt)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Saved Excerpts")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                ShareLink(item: ExcerptTextExporter().exportLibrary(excerpts: excerpts)) {
+                    Label("Export All", systemImage: "square.and.arrow.up")
+                }
+                .disabled(excerpts.isEmpty)
+            }
+        }
+    }
+}
+
 private struct ArchivedBookExcerptsView: View {
     let title: String
     let excerpts: [ExcerptEntity]

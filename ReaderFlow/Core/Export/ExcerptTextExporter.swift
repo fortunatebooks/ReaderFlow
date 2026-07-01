@@ -30,4 +30,38 @@ struct ExcerptTextExporter {
 
         return output
     }
+
+    func exportLibrary(excerpts: [ExcerptEntity], exportedAt: Date = .now) -> String {
+        let groupedExcerpts = Dictionary(grouping: excerpts, by: \.bookTitleSnapshot)
+            .map { title, excerpts in
+                (
+                    title: title,
+                    author: excerpts.first?.authorDisplaySnapshot ?? "Unknown Author",
+                    excerpts: excerpts.sorted { $0.sortProgress < $1.sortProgress }
+                )
+            }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+
+        var output = """
+        ReaderFlow Library Excerpts
+        Exported: \(exportedAt.formatted(date: .abbreviated, time: .shortened))
+        Book Count: \(groupedExcerpts.count)
+        Excerpt Count: \(excerpts.count)
+
+        ===
+
+        """
+
+        for group in groupedExcerpts {
+            output += export(
+                bookTitle: group.title,
+                author: group.author,
+                excerpts: group.excerpts,
+                exportedAt: exportedAt
+            )
+            output += "\n\n"
+        }
+
+        return output
+    }
 }

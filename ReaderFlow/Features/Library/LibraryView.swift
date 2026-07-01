@@ -26,7 +26,13 @@ struct LibraryView: View {
             }
             .navigationTitle("ReaderFlow")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    NavigationLink {
+                        AllExcerptsView()
+                    } label: {
+                        Label("Excerpts", systemImage: "text.quote")
+                    }
+
                     NavigationLink {
                         ArchivedExcerptsView()
                     } label: {
