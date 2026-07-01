@@ -35,7 +35,8 @@ struct ReaderView: View {
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
                 onSelection: saveSelection,
-                onReady: readerDidBecomeReady
+                onReady: readerDidBecomeReady,
+                onTap: toggleReaderPlayback
             )
             .ignoresSafeArea()
 
@@ -88,12 +89,6 @@ struct ReaderView: View {
         .onChange(of: speed) { _, newSpeed in
             activeSettings.autoscrollSpeed = newSpeed
             try? modelContext.save()
-        }
-        .onTapGesture {
-            withAnimation(.easeOut(duration: 0.2)) {
-                isScrolling.toggle()
-                showControls = !isScrolling
-            }
         }
     }
 
@@ -224,6 +219,13 @@ struct ReaderView: View {
     private func readerDidBecomeReady() {
         if isScrolling {
             showControls = false
+        }
+    }
+
+    private func toggleReaderPlayback() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            isScrolling.toggle()
+            showControls = !isScrolling
         }
     }
 

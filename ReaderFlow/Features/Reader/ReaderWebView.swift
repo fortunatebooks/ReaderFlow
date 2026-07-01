@@ -19,6 +19,7 @@ struct ReaderWebView: UIViewRepresentable {
     var onProgress: (ReaderProgressMessage) -> Void
     var onSelection: (ReaderSelectionPayload) -> Void
     var onReady: () -> Void
+    var onTap: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -29,7 +30,8 @@ struct ReaderWebView: UIViewRepresentable {
             currentIsScrolling: isScrolling,
             onProgress: onProgress,
             onSelection: onSelection,
-            onReady: onReady
+            onReady: onReady,
+            onTap: onTap
         )
     }
 
@@ -55,6 +57,7 @@ struct ReaderWebView: UIViewRepresentable {
         context.coordinator.onProgress = onProgress
         context.coordinator.onSelection = onSelection
         context.coordinator.onReady = onReady
+        context.coordinator.onTap = onTap
         context.coordinator.currentInitialProgress = initialProgress
         context.coordinator.currentSpeed = speed
         context.coordinator.currentIsScrolling = isScrolling
@@ -82,6 +85,7 @@ struct ReaderWebView: UIViewRepresentable {
         var onProgress: (ReaderProgressMessage) -> Void
         var onSelection: (ReaderSelectionPayload) -> Void
         var onReady: () -> Void
+        var onTap: () -> Void
 
         init(
             expectedBridgeToken: String,
@@ -91,7 +95,8 @@ struct ReaderWebView: UIViewRepresentable {
             currentIsScrolling: Bool,
             onProgress: @escaping (ReaderProgressMessage) -> Void,
             onSelection: @escaping (ReaderSelectionPayload) -> Void,
-            onReady: @escaping () -> Void
+            onReady: @escaping () -> Void,
+            onTap: @escaping () -> Void
         ) {
             self.expectedBridgeToken = expectedBridgeToken
             self.currentHTML = currentHTML
@@ -101,6 +106,7 @@ struct ReaderWebView: UIViewRepresentable {
             self.onProgress = onProgress
             self.onSelection = onSelection
             self.onReady = onReady
+            self.onTap = onTap
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -121,6 +127,8 @@ struct ReaderWebView: UIViewRepresentable {
                 decode(ReaderProgressMessage.self, from: body["payload"]).map(onProgress)
             case "selectionSaved":
                 decode(ReaderSelectionPayload.self, from: body["payload"]).map(onSelection)
+            case "readerTapped":
+                onTap()
             default:
                 break
             }

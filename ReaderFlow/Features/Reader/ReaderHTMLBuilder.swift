@@ -231,6 +231,17 @@ enum ReaderWebAssets {
         }, 650);
       });
 
+      document.addEventListener('click', (event) => {
+        if (event.target && event.target.closest && event.target.closest('a')) {
+          return;
+        }
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) {
+          return;
+        }
+        post('readerTapped', {});
+      });
+
       window.ReaderFlow = {
         setSpeed(value) {
           speed = Number(value) || 25;
