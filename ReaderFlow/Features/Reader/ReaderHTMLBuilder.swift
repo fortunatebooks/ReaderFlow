@@ -101,6 +101,7 @@ enum ReaderWebAssets {
       let programmaticScrollUntil = 0;
       let scrollProgressTimer = null;
       let pendingPulseHighlightIds = new Set();
+      let lastSavedSelection = { signature: null, savedAt: 0 };
       const speedSwipeEdgeWidth = 84;
 
       const progress = () => {
@@ -227,6 +228,16 @@ enum ReaderWebAssets {
         lastTime = null;
         scheduleProgressPost(140);
         post('scrollStateChanged', { running: false, reason: 'manualScroll' });
+      };
+
+      const pauseForSelection = () => {
+        if (!running) {
+          return;
+        }
+        running = false;
+        lastTime = null;
+        scheduleProgressPost(120);
+        post('scrollStateChanged', { running: false, reason: 'selection' });
       };
 
       const isRightEdgeTouch = (touch) => touch.clientX >= Math.max(0, window.innerWidth - speedSwipeEdgeWidth);
@@ -530,11 +541,38 @@ enum ReaderWebAssets {
         };
       };
 
+      const selectionSignature = (payload) => [
+        payload.selectedText,
+        payload.contextBefore,
+        payload.contextAfter,
+        payload.locator.href,
+        Math.round((payload.locator.chapterProgression || 0) * 10000)
+      ].join('\\u001f');
+
+      const shouldSuppressDuplicateSelection = (payload) => {
+        const signature = selectionSignature(payload);
+        const now = Date.now();
+        if (lastSavedSelection.signature === signature && now - lastSavedSelection.savedAt <= 3000) {
+          return true;
+        }
+        lastSavedSelection.signature = signature;
+        lastSavedSelection.savedAt = now;
+        return false;
+      };
+
       document.addEventListener('selectionchange', () => {
+        const activeSelection = window.getSelection();
+        if (activeSelection && !activeSelection.isCollapsed) {
+          pauseForSelection();
+        }
         clearTimeout(window.__readerFlowSelectionTimer);
         window.__readerFlowSelectionTimer = setTimeout(() => {
           const payload = selectionPayload();
           if (!payload) return;
+          if (shouldSuppressDuplicateSelection(payload)) {
+            window.getSelection().removeAllRanges();
+            return;
+          }
           const selection = window.getSelection();
           if (selection && selection.rangeCount > 0) {
             markSelection(selection.getRangeAt(0).cloneRange(), payload.highlightId);

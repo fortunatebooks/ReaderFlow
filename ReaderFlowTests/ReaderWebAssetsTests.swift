@@ -9,11 +9,13 @@ struct ReaderWebAssetsTests {
 
         #expect(javascript.contains("pauseForManualScroll"))
         #expect(javascript.contains("reason: 'manualScroll'"))
+        #expect(javascript.contains("reason: 'selection'"))
         #expect(javascript.contains("speedSwipeEdgeWidth"))
         #expect(javascript.contains("isRightEdgeTouch"))
         #expect(javascript.contains("reason: 'end'"))
         #expect(javascript.contains("applyHighlights"))
         #expect(javascript.contains("pulseHighlight"))
+        #expect(javascript.contains("shouldSuppressDuplicateSelection"))
     }
 
     @Test func readerScriptMarksRestoreAndNavigationScrollsAsProgrammatic() {
@@ -265,6 +267,49 @@ struct ReaderWebAssetsTests {
         #expect(try harness.int("messages.filter(function(message) { return message.type === 'progressChanged' && message.payload.scrollY === 220; }).length") == 1)
     }
 
+    @Test func selectionWhileRunningPausesAndSavesExcerpt() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            messages = [];
+            now = 1000;
+            window.ReaderFlow.start();
+            activeSelection = makeSelection(1, 0, 14);
+            listeners.document.selectionchange({});
+            flushTimers();
+            """
+        )
+
+        #expect(try harness.int("messages.filter(function(message) { return message.type === 'scrollStateChanged' && message.payload.reason === 'selection'; }).length") == 1)
+        #expect(try harness.int("messages.filter(function(message) { return message.type === 'selectionSaved'; }).length") == 1)
+        #expect(try harness.string("messages.filter(function(message) { return message.type === 'selectionSaved'; })[0].payload.selectedText") == "Second chapter")
+    }
+
+    @Test func duplicateSelectionWithinThreeSecondsIsSuppressed() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate(
+            """
+            messages = [];
+            now = 1000;
+            activeSelection = makeSelection(1, 0, 14);
+            listeners.document.selectionchange({});
+            flushTimers();
+            activeSelection = makeSelection(1, 0, 14);
+            listeners.document.selectionchange({});
+            flushTimers();
+            now = 4501;
+            activeSelection = makeSelection(1, 0, 14);
+            listeners.document.selectionchange({});
+            flushTimers();
+            """
+        )
+
+        #expect(try harness.int("messages.filter(function(message) { return message.type === 'selectionSaved'; }).length") == 2)
+        #expect(try harness.int("highlightElements.length") == 2)
+    }
+
     @Test func pauseCommandIsIdempotentToAvoidBridgeEcho() throws {
         let harness = try ReaderScriptHarness()
 
@@ -357,10 +402,18 @@ private final class ReaderScriptHarness {
     var messages = [];
     var listeners = { document: {}, window: {} };
     var highlightElements = [];
+    var activeSelection = null;
     var now = 0;
     var timerId = 0;
+    var uuidCounter = 0;
     var timers = {};
     Date.now = function() { return now; };
+    var crypto = {
+      randomUUID: function() {
+        uuidCounter += 1;
+        return '00000000-0000-4000-8000-' + ('000000000000' + uuidCounter).slice(-12);
+      }
+    };
     function setTimeout(callback, delay) {
       timerId += 1;
       timers[timerId] = callback;
@@ -391,6 +444,56 @@ private final class ReaderScriptHarness {
         add: function(value) { this.values[value] = true; },
         remove: function(value) { delete this.values[value]; },
         contains: function(value) { return this.values[value] === true; }
+      };
+    }
+    function collapsedSelection() {
+      return {
+        isCollapsed: true,
+        rangeCount: 0,
+        getRangeAt: function() { return null; },
+        removeAllRanges: function() { activeSelection = collapsedSelection(); },
+        toString: function() { return ''; }
+      };
+    }
+    function rangeTextBetween(range) {
+      if (!range.startContainer || !range.endContainer) {
+        return '';
+      }
+      if (range.startContainer === range.endContainer) {
+        return range.startContainer.nodeValue.slice(range.startOffset, range.endOffset);
+      }
+      const root = range.selectedRoot || range.startContainer.parentElement;
+      const nodes = root && root.textNodes ? root.textNodes : [range.startContainer, range.endContainer];
+      let text = '';
+      let isCollecting = false;
+      for (var index = 0; index < nodes.length; index += 1) {
+        const node = nodes[index];
+        if (node === range.startContainer) {
+          isCollecting = true;
+          if (node === range.endContainer) {
+            return text + node.nodeValue.slice(range.startOffset, range.endOffset);
+          }
+          text += node.nodeValue.slice(range.startOffset);
+        } else if (node === range.endContainer) {
+          text += node.nodeValue.slice(0, range.endOffset);
+          break;
+        } else if (isCollecting) {
+          text += node.nodeValue;
+        }
+      }
+      return text;
+    }
+    function makeSelection(chapterIndex, startOffset, endOffset) {
+      const node = chapters[chapterIndex].textNodes[0];
+      const range = document.createRange();
+      range.setStart(node, startOffset);
+      range.setEnd(node, endOffset);
+      return {
+        isCollapsed: false,
+        rangeCount: 1,
+        getRangeAt: function() { return range; },
+        removeAllRanges: function() { activeSelection = collapsedSelection(); },
+        toString: function() { return range.toString(); }
       };
     }
     var chapters = [
@@ -444,12 +547,7 @@ private final class ReaderScriptHarness {
         dispatchWindow('scroll', {});
       },
       getSelection: function() {
-        return {
-          isCollapsed: true,
-          rangeCount: 0,
-          getRangeAt: function() { return null; },
-          removeAllRanges: function() {}
-        };
+        return activeSelection || collapsedSelection();
       }
     };
     var document = {
@@ -512,15 +610,45 @@ private final class ReaderScriptHarness {
       },
       createRange: function() {
         return {
+          selectedRoot: null,
+          startContainer: null,
           startNode: null,
           startOffset: 0,
+          endContainer: null,
           endNode: null,
           endOffset: 0,
-          selectNodeContents: function() {},
-          setEnd: function(node, offset) { this.endNode = node; this.endOffset = offset; },
-          setStart: function(node, offset) { this.startNode = node; this.startOffset = offset; },
+          selectNodeContents: function(root) {
+            this.selectedRoot = root;
+            const nodes = root && root.textNodes ? root.textNodes : [];
+            if (nodes.length > 0) {
+              this.setStart(nodes[0], 0);
+              this.setEnd(nodes[nodes.length - 1], nodes[nodes.length - 1].nodeValue.length);
+            }
+          },
+          setEnd: function(node, offset) {
+            this.endContainer = node;
+            this.endNode = node;
+            this.endOffset = offset;
+          },
+          setStart: function(node, offset) {
+            this.startContainer = node;
+            this.startNode = node;
+            this.startOffset = offset;
+          },
+          getBoundingClientRect: function() {
+            const chapter = this.startContainer && this.startContainer.parentElement;
+            const baseTop = chapter === chapters[1] ? 1000 : 0;
+            return { top: baseTop + 210 - window.scrollY, height: 20 };
+          },
+          cloneRange: function() {
+            const range = document.createRange();
+            range.selectedRoot = this.selectedRoot;
+            range.setStart(this.startContainer, this.startOffset);
+            range.setEnd(this.endContainer, this.endOffset);
+            return range;
+          },
           surroundContents: function(marker) {
-            marker.text = this.startNode.nodeValue.slice(this.startOffset, this.endOffset);
+            marker.text = this.toString();
             marker.parentNode = {
               insertBefore: function() {},
               normalize: function() {}
@@ -529,7 +657,7 @@ private final class ReaderScriptHarness {
           },
           extractContents: function() { return {}; },
           insertNode: function(marker) { highlightElements.push(marker); },
-          toString: function() { return ''; }
+          toString: function() { return rangeTextBetween(this); }
         };
       }
     };

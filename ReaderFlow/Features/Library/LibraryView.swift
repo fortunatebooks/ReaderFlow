@@ -10,6 +10,7 @@ struct LibraryView: View {
     @State private var importError: String?
     @State private var searchText = ""
     @State private var sortMode: LibrarySortMode = .recent
+    @State private var pendingArchiveBook: BookEntity?
 
     private var activeBooks: [BookEntity] {
         books.filter { !$0.isArchived }
@@ -87,6 +88,16 @@ struct LibraryView: View {
             } message: {
                 Text(importError ?? "")
             }
+            .alert("Delete Local Copy?", isPresented: archiveConfirmationBinding) {
+                Button("Delete Local Copy", role: .destructive) {
+                    archivePendingBook()
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingArchiveBook = nil
+                }
+            } message: {
+                Text(archiveConfirmationMessage)
+            }
             .onOpenURL { url in
                 importEPUB(from: url)
             }
@@ -147,7 +158,7 @@ struct LibraryView: View {
         }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) {
-                archive(book)
+                confirmArchive(book)
             } label: {
                 Label("Delete Local Copy", systemImage: "trash")
             }
@@ -166,11 +177,38 @@ struct LibraryView: View {
             .disabled(bookExcerpts.isEmpty)
 
             Button(role: .destructive) {
-                archive(book)
+                confirmArchive(book)
             } label: {
                 Label("Delete Local Copy", systemImage: "trash")
             }
         }
+    }
+
+    private var archiveConfirmationBinding: Binding<Bool> {
+        Binding {
+            pendingArchiveBook != nil
+        } set: { isPresented in
+            if !isPresented {
+                pendingArchiveBook = nil
+            }
+        }
+    }
+
+    private var archiveConfirmationMessage: String {
+        guard let pendingArchiveBook else {
+            return "The EPUB file and extracted reader files will be removed from this device. Saved excerpts will remain available under Archived."
+        }
+        return "The EPUB file and extracted reader files for \"\(pendingArchiveBook.title)\" will be removed from this device. Saved excerpts will remain available under Archived."
+    }
+
+    private func confirmArchive(_ book: BookEntity) {
+        pendingArchiveBook = book
+    }
+
+    private func archivePendingBook() {
+        guard let pendingArchiveBook else { return }
+        archive(pendingArchiveBook)
+        self.pendingArchiveBook = nil
     }
 
     private func excerpts(for book: BookEntity) -> [ExcerptEntity] {
