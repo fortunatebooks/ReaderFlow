@@ -18,7 +18,6 @@ build/
 # Swift Package Manager
 .build/
 .swiftpm/
-Package.resolved
 
 # XcodeGen output
 *.xcodeproj/

@@ -1,4 +1,3 @@
-import CryptoKit
 import SwiftData
 import SwiftUI
 
@@ -124,49 +123,54 @@ struct LibraryView: View {
     }
 
     private func importEPUB(from url: URL) {
+        let knownFingerprints = Set(books.map(\.contentFingerprint))
         Task {
             do {
-                let draft = try await buildImportDraft(from: url)
-                let book = BookEntity(
-                    id: draft.id,
-                    title: draft.title,
-                    originalFileName: draft.originalFileName,
-                    epubFileName: draft.epubFileName,
-                    fileSizeBytes: draft.fileSizeBytes,
-                    contentFingerprint: draft.contentFingerprint
-                )
-                modelContext.insert(book)
-                try modelContext.save()
+                let draft = try await buildImportDraft(from: url, knownFingerprints: knownFingerprints)
+                try saveImportedBook(draft)
             } catch {
                 importError = error.localizedDescription
             }
         }
     }
 
-    private func buildImportDraft(from url: URL) async throws -> ImportedBookDraft {
+    private func buildImportDraft(from url: URL, knownFingerprints: Set<String>) async throws -> ImportedEPUBDraft {
         try await Task.detached(priority: .userInitiated) {
-            let didStartAccessing = url.startAccessingSecurityScopedResource()
-            defer {
-                if didStartAccessing {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            let bookId = UUID()
             let store = try AppFileStore()
-            let copiedURL = try store.copyEPUB(from: url, bookId: bookId)
-            let data = try Data(contentsOf: copiedURL)
-            let fingerprint = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-
-            return ImportedBookDraft(
-                id: bookId,
-                title: url.deletingPathExtension().lastPathComponent,
-                originalFileName: url.lastPathComponent,
-                epubFileName: "source.epub",
-                fileSizeBytes: Int64(data.count),
-                contentFingerprint: fingerprint
-            )
+            return try await EPUBImportService(fileStore: store)
+                .importEPUB(from: url, knownFingerprints: knownFingerprints)
         }.value
+    }
+
+    private func saveImportedBook(_ draft: ImportedEPUBDraft) throws {
+        let book = BookEntity(
+            id: draft.id,
+            title: draft.title,
+            authorDisplay: draft.authorDisplay,
+            authorsJSON: draft.encodedAuthors(),
+            languageCode: draft.languageCode,
+            originalFileName: draft.originalFileName,
+            epubFileName: draft.epubFileName,
+            expandedDirectoryName: draft.expandedDirectoryName,
+            tableOfContentsJSON: draft.encodedTableOfContents(),
+            fileSizeBytes: draft.fileSizeBytes,
+            expandedSizeBytes: draft.preflight.expandedSizeBytes,
+            xhtmlSizeBytes: draft.preflight.xhtmlSizeBytes,
+            spineItemCount: draft.package.readingOrder.count,
+            estimatedDomNodeCount: draft.preflight.estimatedDomNodeCount,
+            imageCount: draft.preflight.imageCount,
+            contentFingerprint: draft.contentFingerprint
+        )
+
+        do {
+            modelContext.insert(book)
+            try modelContext.save()
+        } catch {
+            if let store = try? AppFileStore() {
+                try? store.removeBookFiles(bookId: draft.id)
+            }
+            throw error
+        }
     }
 
     private func archive(_ book: BookEntity) {
@@ -182,15 +186,6 @@ struct LibraryView: View {
         }
         try? modelContext.save()
     }
-}
-
-private struct ImportedBookDraft {
-    var id: UUID
-    var title: String
-    var originalFileName: String
-    var epubFileName: String
-    var fileSizeBytes: Int64
-    var contentFingerprint: String
 }
 
 private struct BookRow: View {

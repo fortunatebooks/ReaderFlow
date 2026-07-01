@@ -39,6 +39,10 @@ struct AppFileStore {
         return destination
     }
 
+    func expandedDirectory(for bookId: UUID, fileManager: FileManager = .default) throws -> URL {
+        try directory(for: bookId, fileManager: fileManager).appending(path: "expanded", directoryHint: .isDirectory)
+    }
+
     func removeBookFiles(bookId: UUID, fileManager: FileManager = .default) throws {
         let url = booksURL.appending(path: bookId.uuidString, directoryHint: .isDirectory)
         guard fileManager.fileExists(atPath: url.path) else { return }
