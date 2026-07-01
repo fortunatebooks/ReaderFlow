@@ -1,0 +1,65 @@
+name: ReaderFlow
+options:
+  bundleIdPrefix: com.readerflow
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  Readium:
+    url: https://github.com/readium/swift-toolkit.git
+    exactVersion: 3.10.0
+  SwiftSoup:
+    url: https://github.com/scinfu/SwiftSoup.git
+    exactVersion: 2.13.5
+  ReadiumZIPFoundation:
+    url: https://github.com/readium/ZIPFoundation.git
+    exactVersion: 3.0.1
+targets:
+  ReaderFlow:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: ReaderFlow
+        excludes:
+          - Resources/**
+    resources:
+      - path: ReaderFlow/Resources
+    dependencies:
+      - package: Readium
+        product: ReadiumShared
+      - package: Readium
+        product: ReadiumStreamer
+      - package: SwiftSoup
+        product: SwiftSoup
+      - package: ReadiumZIPFoundation
+        product: ReadiumZIPFoundation
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.readerflow.ReaderFlow
+        INFOPLIST_FILE: ReaderFlow/App/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        TARGETED_DEVICE_FAMILY: "1"
+  ReaderFlowTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: ReaderFlowTests
+    dependencies:
+      - target: ReaderFlow
+  ReaderFlowUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: ReaderFlowUITests
+    dependencies:
+      - target: ReaderFlow

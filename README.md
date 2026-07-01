@@ -11,7 +11,8 @@ Planning and project setup are in progress.
 Important documents:
 
 - [Design spec](docs/design-spec.md)
-- [Implementation plan](docs/implementation-plan.md)
+
+The detailed implementation plan is kept locally at `docs/implementation-plan.md` and intentionally ignored because it is a working orchestration artifact.
 
 ## Product Direction
 
@@ -35,5 +36,17 @@ The implementation plan commits to:
 - A custom continuous `WKWebView` reader for the core reading surface.
 - XcodeGen for reproducible project generation.
 
-The Xcode project has not been generated yet. Follow `docs/implementation-plan.md` for the build order.
+Generate the Xcode project with:
 
+```sh
+make generate
+```
+
+Then build or test with:
+
+```sh
+make build
+make test
+```
+
+This requires Xcode 16.4+ and XcodeGen.

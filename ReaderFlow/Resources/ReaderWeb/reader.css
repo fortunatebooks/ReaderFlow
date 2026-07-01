@@ -1,0 +1,29 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--rf-bg, #fbfaf7);
+  color: var(--rf-text, #171717);
+  font-family: var(--rf-font-family, ui-serif, Georgia, serif);
+  font-size: var(--rf-text-size, 18px);
+  line-height: var(--rf-line-height, 1.55);
+}
+
+body {
+  padding: 18vh 22px 32vh;
+}
+
+main {
+  max-width: 42rem;
+  margin: 0 auto;
+}
+
+p {
+  margin: 0 0 1.05rem;
+}
+
+.rf-highlight {
+  background: rgba(255, 214, 94, 0.58);
+  border-radius: 3px;
+}
+
