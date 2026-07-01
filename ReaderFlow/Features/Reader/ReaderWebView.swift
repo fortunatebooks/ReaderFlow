@@ -13,6 +13,7 @@ struct ReaderWebView: UIViewRepresentable {
     let expectedBridgeToken: String
     let expectedBookId: UUID
     let bookResourceRootURL: URL?
+    let initialProgress: Double
     @Binding var speed: Double
     @Binding var isScrolling: Bool
     var onProgress: (ReaderProgressMessage) -> Void
@@ -23,6 +24,7 @@ struct ReaderWebView: UIViewRepresentable {
         Coordinator(
             expectedBridgeToken: expectedBridgeToken,
             currentHTML: html,
+            currentInitialProgress: initialProgress,
             currentSpeed: speed,
             currentIsScrolling: isScrolling,
             onProgress: onProgress,
@@ -53,22 +55,30 @@ struct ReaderWebView: UIViewRepresentable {
         context.coordinator.onProgress = onProgress
         context.coordinator.onSelection = onSelection
         context.coordinator.onReady = onReady
+        context.coordinator.currentInitialProgress = initialProgress
         context.coordinator.currentSpeed = speed
         context.coordinator.currentIsScrolling = isScrolling
         if context.coordinator.currentHTML != html {
             context.coordinator.currentHTML = html
+            context.coordinator.isDocumentReady = false
+            context.coordinator.hasAppliedInitialProgress = false
             webView.loadHTMLString(html, baseURL: nil)
             return
         }
 
-        context.coordinator.applyReaderState(to: webView)
+        if context.coordinator.isDocumentReady {
+            context.coordinator.applyReaderState(to: webView)
+        }
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         let expectedBridgeToken: String
         var currentHTML: String
+        var currentInitialProgress: Double
         var currentSpeed: Double
         var currentIsScrolling: Bool
+        var isDocumentReady = false
+        var hasAppliedInitialProgress = false
         var onProgress: (ReaderProgressMessage) -> Void
         var onSelection: (ReaderSelectionPayload) -> Void
         var onReady: () -> Void
@@ -76,6 +86,7 @@ struct ReaderWebView: UIViewRepresentable {
         init(
             expectedBridgeToken: String,
             currentHTML: String,
+            currentInitialProgress: Double,
             currentSpeed: Double,
             currentIsScrolling: Bool,
             onProgress: @escaping (ReaderProgressMessage) -> Void,
@@ -84,6 +95,7 @@ struct ReaderWebView: UIViewRepresentable {
         ) {
             self.expectedBridgeToken = expectedBridgeToken
             self.currentHTML = currentHTML
+            self.currentInitialProgress = currentInitialProgress
             self.currentSpeed = currentSpeed
             self.currentIsScrolling = currentIsScrolling
             self.onProgress = onProgress
@@ -132,15 +144,29 @@ struct ReaderWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            isDocumentReady = true
             applyReaderState(to: webView)
         }
 
         func applyReaderState(to webView: WKWebView) {
+            let initialProgressCommand: String
+            if hasAppliedInitialProgress {
+                initialProgressCommand = ""
+            } else {
+                hasAppliedInitialProgress = true
+                initialProgressCommand = "window.ReaderFlow && window.ReaderFlow.scrollToProgress(\(boundedProgress(currentInitialProgress)));"
+            }
+
             let command = """
+            \(initialProgressCommand)
             window.ReaderFlow && window.ReaderFlow.setSpeed(\(currentSpeed));
             window.ReaderFlow && window.ReaderFlow.\(currentIsScrolling ? "start" : "pause")();
             """
             webView.evaluateJavaScript(command)
+        }
+
+        private func boundedProgress(_ value: Double) -> Double {
+            min(1, max(0, value))
         }
 
         private func decode<T: Decodable>(_ type: T.Type, from object: Any?) -> T? {

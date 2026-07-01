@@ -30,6 +30,7 @@ struct ReaderView: View {
                 expectedBridgeToken: bridgeToken,
                 expectedBookId: book.id,
                 bookResourceRootURL: bookResourceRootURL,
+                initialProgress: book.readingProgress,
                 speed: $speed,
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
@@ -247,6 +248,9 @@ struct ReaderView: View {
         confirmationText = activeSettings.autoCopyHighlights ? "Excerpt saved and copied" : "Excerpt saved"
         if activeSettings.autoCopyHighlights {
             UIPasteboard.general.string = selection.selectedText
+        }
+        if activeSettings.hapticsEnabled {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
             confirmationText = nil

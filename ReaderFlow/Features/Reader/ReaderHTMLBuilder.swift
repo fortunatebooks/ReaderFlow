@@ -235,6 +235,14 @@ enum ReaderWebAssets {
         setSpeed(value) {
           speed = Number(value) || 25;
         },
+        scrollToProgress(value) {
+          const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+          const viewportHeight = window.innerHeight || 1;
+          const maxScroll = Math.max(0, documentHeight - viewportHeight);
+          const target = Math.max(0, Math.min(1, Number(value) || 0));
+          window.scrollTo(0, maxScroll * target);
+          post('progressChanged', progress());
+        },
         start() {
           if (!running) {
             running = true;
