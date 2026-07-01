@@ -180,6 +180,18 @@ enum ReaderWebAssets {
         return Math.max(0, Math.min(1, (selectionTop - chapterTop) / chapterHeight));
       };
 
+      const markSelection = (range, highlightId) => {
+        try {
+          const marker = document.createElement('mark');
+          marker.className = 'rf-highlight';
+          marker.dataset.highlightId = highlightId;
+          range.surroundContents(marker);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      };
+
       const selectionPayload = () => {
         const selection = window.getSelection();
         if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
@@ -226,6 +238,10 @@ enum ReaderWebAssets {
         window.__readerFlowSelectionTimer = setTimeout(() => {
           const payload = selectionPayload();
           if (!payload) return;
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            markSelection(selection.getRangeAt(0).cloneRange(), payload.highlightId);
+          }
           post('selectionSaved', payload);
           window.getSelection().removeAllRanges();
         }, 650);
