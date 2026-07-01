@@ -11,21 +11,31 @@ struct ReaderProgressMessage: Decodable, Hashable {
 struct ReaderWebView: UIViewRepresentable {
     let html: String
     let expectedBridgeToken: String
+    let expectedBookId: UUID
     let bookResourceRootURL: URL?
     @Binding var speed: Double
     @Binding var isScrolling: Bool
     var onProgress: (ReaderProgressMessage) -> Void
     var onSelection: (ReaderSelectionPayload) -> Void
+    var onReady: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(expectedBridgeToken: expectedBridgeToken, onProgress: onProgress, onSelection: onSelection)
+        Coordinator(
+            expectedBridgeToken: expectedBridgeToken,
+            currentHTML: html,
+            currentSpeed: speed,
+            currentIsScrolling: isScrolling,
+            onProgress: onProgress,
+            onSelection: onSelection,
+            onReady: onReady
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = false
         configuration.setURLSchemeHandler(
-            ReaderResourceSchemeHandler(bookResourceRootURL: bookResourceRootURL),
+            ReaderResourceSchemeHandler(expectedBookId: expectedBookId, bookResourceRootURL: bookResourceRootURL),
             forURLScheme: "readerflow"
         )
         configuration.userContentController.add(context.coordinator, name: "readerFlow")
@@ -42,26 +52,43 @@ struct ReaderWebView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onProgress = onProgress
         context.coordinator.onSelection = onSelection
-        let command = """
-        window.ReaderFlow && window.ReaderFlow.setSpeed(\(speed));
-        window.ReaderFlow && window.ReaderFlow.\(isScrolling ? "start" : "pause")();
-        """
-        webView.evaluateJavaScript(command)
+        context.coordinator.onReady = onReady
+        context.coordinator.currentSpeed = speed
+        context.coordinator.currentIsScrolling = isScrolling
+        if context.coordinator.currentHTML != html {
+            context.coordinator.currentHTML = html
+            webView.loadHTMLString(html, baseURL: nil)
+            return
+        }
+
+        context.coordinator.applyReaderState(to: webView)
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         let expectedBridgeToken: String
+        var currentHTML: String
+        var currentSpeed: Double
+        var currentIsScrolling: Bool
         var onProgress: (ReaderProgressMessage) -> Void
         var onSelection: (ReaderSelectionPayload) -> Void
+        var onReady: () -> Void
 
         init(
             expectedBridgeToken: String,
+            currentHTML: String,
+            currentSpeed: Double,
+            currentIsScrolling: Bool,
             onProgress: @escaping (ReaderProgressMessage) -> Void,
-            onSelection: @escaping (ReaderSelectionPayload) -> Void
+            onSelection: @escaping (ReaderSelectionPayload) -> Void,
+            onReady: @escaping () -> Void
         ) {
             self.expectedBridgeToken = expectedBridgeToken
+            self.currentHTML = currentHTML
+            self.currentSpeed = currentSpeed
+            self.currentIsScrolling = currentIsScrolling
             self.onProgress = onProgress
             self.onSelection = onSelection
+            self.onReady = onReady
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -75,6 +102,9 @@ struct ReaderWebView: UIViewRepresentable {
             }
 
             switch type {
+            case "readerReady":
+                onReady()
+                decode(ReaderProgressMessage.self, from: body["payload"]).map(onProgress)
             case "progressChanged":
                 decode(ReaderProgressMessage.self, from: body["payload"]).map(onProgress)
             case "selectionSaved":
@@ -99,6 +129,18 @@ struct ReaderWebView: UIViewRepresentable {
             } else {
                 decisionHandler(.cancel)
             }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            applyReaderState(to: webView)
+        }
+
+        func applyReaderState(to webView: WKWebView) {
+            let command = """
+            window.ReaderFlow && window.ReaderFlow.setSpeed(\(currentSpeed));
+            window.ReaderFlow && window.ReaderFlow.\(currentIsScrolling ? "start" : "pause")();
+            """
+            webView.evaluateJavaScript(command)
         }
 
         private func decode<T: Decodable>(_ type: T.Type, from object: Any?) -> T? {

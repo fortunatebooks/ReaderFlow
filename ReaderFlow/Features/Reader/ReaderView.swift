@@ -11,7 +11,9 @@ struct ReaderView: View {
     @State private var speed: Double = 25
     @State private var showControls = true
     @State private var confirmationText: String?
-    private let bridgeToken = UUID().uuidString
+    @State private var readerHTML: String?
+    @State private var readerLoadError: String?
+    @State private var bridgeToken = UUID().uuidString
 
     private var activeSettings: ReaderSettingsEntity {
         if let existing = settings.first {
@@ -24,13 +26,15 @@ struct ReaderView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             ReaderWebView(
-                html: ReaderHTMLBuilder.placeholderHTML(book: book, settings: activeSettings, bridgeToken: bridgeToken),
+                html: currentReaderHTML,
                 expectedBridgeToken: bridgeToken,
+                expectedBookId: book.id,
                 bookResourceRootURL: bookResourceRootURL,
                 speed: $speed,
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
-                onSelection: saveSelection
+                onSelection: saveSelection,
+                onReady: readerDidBecomeReady
             )
             .ignoresSafeArea()
 
@@ -47,6 +51,15 @@ struct ReaderView: View {
                     .padding(.vertical, 10)
                     .background(.thinMaterial, in: Capsule())
                     .padding(.bottom, 92)
+            }
+
+            if let readerLoadError {
+                Text(readerLoadError)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.bottom, 140)
             }
         }
         .navigationTitle(book.title)
@@ -67,6 +80,9 @@ struct ReaderView: View {
             book.lastOpenedAt = .now
             book.lastOpenedSortKey = .now
             try? modelContext.save()
+        }
+        .task(id: book.id) {
+            await loadReaderHTML()
         }
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.2)) {
@@ -105,11 +121,71 @@ struct ReaderView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
     }
 
+    private var currentReaderHTML: String {
+        readerHTML ?? ReaderHTMLBuilder.placeholderHTML(
+            book: book,
+            settings: activeSettings,
+            bridgeToken: bridgeToken
+        )
+    }
+
     private var bookResourceRootURL: URL? {
+        expandedRootURL(bookId: book.id, expandedDirectoryName: book.expandedDirectoryName)
+    }
+
+    @MainActor
+    private func loadReaderHTML() async {
+        readerLoadError = nil
+        readerHTML = nil
+
+        let bookId = book.id
+        let title = book.title
+        let expandedDirectoryName = book.expandedDirectoryName
+        let documentSettings = ReaderDocumentSettings(activeSettings)
+        let currentBridgeToken = bridgeToken
+
+        guard let expandedRootURL = expandedRootURL(bookId: bookId, expandedDirectoryName: expandedDirectoryName) else {
+            readerLoadError = ReaderDocumentLoadError.missingExpandedDirectory.localizedDescription
+            return
+        }
+
+        do {
+            let html = try await Task.detached(priority: .userInitiated) {
+                let package = try EPUBPackageParser().parseExpandedEPUB(at: expandedRootURL)
+                let chapters = try EPUBContentLoader().loadChapters(
+                    expandedRootURL: expandedRootURL,
+                    package: package,
+                    bookId: bookId
+                )
+                guard !chapters.isEmpty else {
+                    throw ReaderDocumentLoadError.emptyReadingOrder
+                }
+
+                return ContinuousDocumentBuilder(
+                    sanitizer: EPUBContentSanitizer(),
+                    resolver: package.resourceResolver
+                )
+                .buildDocument(
+                    title: title,
+                    chapters: chapters,
+                    settings: documentSettings,
+                    bridgeToken: currentBridgeToken
+                )
+            }.value
+
+            guard !Task.isCancelled else { return }
+            readerHTML = html
+        } catch {
+            guard !Task.isCancelled else { return }
+            readerLoadError = error.localizedDescription
+        }
+    }
+
+    private func expandedRootURL(bookId: UUID, expandedDirectoryName: String?) -> URL? {
         guard let store = try? AppFileStore() else { return nil }
         return store.booksURL
-            .appending(path: book.id.uuidString, directoryHint: .isDirectory)
-            .appending(path: "expanded", directoryHint: .isDirectory)
+            .appending(path: bookId.uuidString, directoryHint: .isDirectory)
+            .appending(path: expandedDirectoryName ?? "expanded", directoryHint: .isDirectory)
     }
 
     private func ensureSettings() {
@@ -123,6 +199,12 @@ struct ReaderView: View {
         book.lastOpenedAt = .now
         book.lastOpenedSortKey = .now
         try? modelContext.save()
+    }
+
+    private func readerDidBecomeReady() {
+        if isScrolling {
+            showControls = false
+        }
     }
 
     private func saveSelection(_ selection: ReaderSelectionPayload) {
@@ -149,6 +231,20 @@ struct ReaderView: View {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
             confirmationText = nil
+        }
+    }
+}
+
+private enum ReaderDocumentLoadError: LocalizedError {
+    case missingExpandedDirectory
+    case emptyReadingOrder
+
+    var errorDescription: String? {
+        switch self {
+        case .missingExpandedDirectory:
+            "ReaderFlow could not find this book's extracted EPUB files."
+        case .emptyReadingOrder:
+            "ReaderFlow could not find readable chapters in this EPUB."
         }
     }
 }

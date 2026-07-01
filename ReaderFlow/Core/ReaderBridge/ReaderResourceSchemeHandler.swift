@@ -3,15 +3,18 @@ import UniformTypeIdentifiers
 import WebKit
 
 final class ReaderResourceSchemeHandler: NSObject, WKURLSchemeHandler {
+    private let expectedBookId: UUID?
     private let bookResourceRootURL: URL?
     private let bundle: Bundle
     private let fileManager: FileManager
 
     init(
+        expectedBookId: UUID? = nil,
         bookResourceRootURL: URL?,
         bundle: Bundle = .main,
         fileManager: FileManager = .default
     ) {
+        self.expectedBookId = expectedBookId
         self.bookResourceRootURL = bookResourceRootURL
         self.bundle = bundle
         self.fileManager = fileManager
@@ -70,6 +73,9 @@ final class ReaderResourceSchemeHandler: NSObject, WKURLSchemeHandler {
         guard let bookResourceRootURL else { return nil }
         let parts = url.pathComponents.filter { $0 != "/" }
         guard parts.count >= 2 else { return nil }
+        if let expectedBookId, parts.first != expectedBookId.uuidString {
+            return nil
+        }
         let relativeParts = parts.dropFirst()
         let candidate = relativeParts.reduce(bookResourceRootURL) { partial, component in
             partial.appending(path: component)

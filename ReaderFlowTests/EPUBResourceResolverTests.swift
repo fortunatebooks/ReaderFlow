@@ -42,6 +42,175 @@ struct EPUBResourceResolverTests {
 
         #expect(path == "OPS/chapter2.xhtml#note")
     }
+
+    @Test func resolvesFragmentOnlyHrefsAgainstBaseResource() throws {
+        let resolver = EPUBResourceResolver(packageRoot: "OPS")
+
+        let path = try #require(resolver.normalizedResourcePath("#note", relativeTo: "Text/chapter1.xhtml"))
+
+        #expect(path == "OPS/Text/chapter1.xhtml#note")
+    }
+
+    @Test func readerURLsPercentEncodeResourcePaths() throws {
+        let resolver = EPUBResourceResolver(packageRoot: "OPS")
+        let bookId = try #require(UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
+
+        let url = try #require(resolver.readerURL(for: "../Images/cover art.jpg", bookId: bookId, relativeTo: "Text/chapter1.xhtml"))
+
+        #expect(url.absoluteString == "readerflow://book/11111111-1111-1111-1111-111111111111/OPS/Images/cover%20art.jpg")
+    }
+}
+
+struct EPUBContentLoaderTests {
+    @Test func loadsBodyHTMLAndRewritesLocalResources() throws {
+        let fileManager = FileManager.default
+        let rootURL = try temporaryExpandedRoot()
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+
+        try write(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <head>
+                <title>Chapter One</title>
+              </head>
+              <body>
+                <h1>Heading Fallback</h1>
+                <style>.cover { background: url('../Images/bg.jpg'); } .remote { background: url('https://example.com/bg.jpg'); }</style>
+                <p style="background-image: url('../Images/bg.jpg')">First text.</p>
+                <img src="../Images/cover art.jpg" srcset="../Images/cover-small.jpg 1x, ../Images/cover%20large.jpg 2x"/>
+                <a href="chapter2.xhtml#next">Next</a>
+                <a href="#local-note">Local</a>
+                <img src="../../secret.png"/>
+                <img src="https://example.com/remote.png"/>
+                <script>alert(1)</script>
+              </body>
+            </html>
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Text")
+                .appendingPathComponent("chapter 1.xhtml")
+        )
+        try write(
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <body>
+                <h2>Second Chapter</h2>
+                <p>Second text.</p>
+              </body>
+            </html>
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Text")
+                .appendingPathComponent("chapter2.xhtml")
+        )
+
+        let bookId = try #require(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
+        let package = EPUBPackageDocument(
+            opfPath: "OEBPS/content.opf",
+            packageRoot: "OEBPS",
+            metadata: .empty,
+            manifest: [
+                EPUBManifestItem(
+                    id: "chapter-1",
+                    href: "Text/chapter%201.xhtml",
+                    mediaType: "application/xhtml+xml",
+                    properties: []
+                ),
+                EPUBManifestItem(
+                    id: "chapter-2",
+                    href: "Text/chapter2.xhtml",
+                    mediaType: "application/xhtml+xml",
+                    properties: []
+                ),
+                EPUBManifestItem(
+                    id: "style",
+                    href: "Styles/book.css",
+                    mediaType: "text/css",
+                    properties: []
+                ),
+            ],
+            spine: [
+                EPUBSpineItem(idref: "chapter-1", linear: true),
+                EPUBSpineItem(idref: "style", linear: true),
+                EPUBSpineItem(idref: "chapter-2", linear: true),
+            ]
+        )
+
+        let chapters = try EPUBContentLoader().loadChapters(
+            expandedRootURL: rootURL,
+            package: package,
+            bookId: bookId
+        )
+
+        #expect(chapters.map(\.href) == ["Text/chapter%201.xhtml", "Text/chapter2.xhtml"])
+        #expect(chapters.map(\.title) == ["Chapter One", "Second Chapter"])
+        #expect(chapters[0].bodyHTML.contains("<p>First text.</p>"))
+        #expect(!chapters[0].bodyHTML.contains("<title>"))
+        #expect(chapters[0].bodyHTML.contains("src=\"readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover%20art.jpg\""))
+        #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover-small.jpg 1x"))
+        #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover%20large.jpg 2x"))
+        #expect(chapters[0].bodyHTML.contains("href=\"readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Text/chapter2.xhtml#next\""))
+        #expect(chapters[0].bodyHTML.contains("href=\"#local-note\""))
+        #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/bg.jpg"))
+        #expect(!chapters[0].bodyHTML.localizedCaseInsensitiveContains("<script"))
+        #expect(!chapters[0].bodyHTML.contains("https://example.com"))
+        #expect(!chapters[0].bodyHTML.contains("../../secret.png"))
+    }
+
+    @Test func rejectsUnsafeReadingOrderHref() throws {
+        let rootURL = try temporaryExpandedRoot()
+        defer {
+            try? FileManager.default.removeItem(at: rootURL)
+        }
+
+        let bookId = try #require(UUID(uuidString: "33333333-3333-3333-3333-333333333333"))
+        let package = EPUBPackageDocument(
+            opfPath: "OEBPS/content.opf",
+            packageRoot: "OEBPS",
+            metadata: .empty,
+            manifest: [
+                EPUBManifestItem(
+                    id: "chapter",
+                    href: "../outside.xhtml",
+                    mediaType: "application/xhtml+xml",
+                    properties: []
+                ),
+            ],
+            spine: [
+                EPUBSpineItem(idref: "chapter", linear: true),
+            ]
+        )
+
+        do {
+            _ = try EPUBContentLoader().loadChapters(expandedRootURL: rootURL, package: package, bookId: bookId)
+            Issue.record("Expected unsafe reading order href to throw")
+        } catch let EPUBContentLoaderError.unsafeReadingOrderHref(href) {
+            #expect(href == "../outside.xhtml")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    private func temporaryExpandedRoot() throws -> URL {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReaderFlowContentLoaderTests")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        return rootURL
+    }
+
+    private func write(_ string: String, to url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(string.utf8).write(to: url)
+    }
 }
 
 struct EPUBPackageParserTests {

@@ -8,7 +8,7 @@ struct EPUBResourceResolver {
             return nil
         }
 
-        let rawPath = href.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? href
+        let rawPath = components.path
         guard let decodedPath = rawPath.removingPercentEncoding,
               !decodedPath.hasPrefix("/")
         else {
@@ -16,19 +16,30 @@ struct EPUBResourceResolver {
         }
 
         let rootParts = pathParts(packageRoot)
+        if decodedPath.isEmpty {
+            guard let basePath,
+                  let baseParts = normalizedBaseResourceParts(basePath, rootParts: rootParts),
+                  !baseParts.isEmpty,
+                  components.fragment?.isEmpty == false
+            else {
+                return nil
+            }
+
+            return appendingFragment(components.fragment, to: baseParts.joined(separator: "/"))
+        }
+
         var resolvedParts = rootParts
-        let rootDepth = resolvedParts.count
 
         if let basePath {
-            var baseParts = pathParts(basePath.removingPercentEncoding ?? basePath)
-            if baseParts.starts(with: rootParts) {
-                baseParts.removeFirst(rootParts.count)
+            guard var baseParts = normalizedBaseResourceParts(basePath, rootParts: rootParts) else {
+                return nil
             }
             if !baseParts.isEmpty {
                 baseParts.removeLast()
             }
-            resolvedParts.append(contentsOf: baseParts)
+            resolvedParts = baseParts
         }
+        let rootDepth = rootParts.count
 
         for part in pathParts(decodedPath) {
             switch part {
@@ -45,22 +56,68 @@ struct EPUBResourceResolver {
         }
 
         let normalized = resolvedParts.joined(separator: "/")
-        if let fragment = components.fragment, !fragment.isEmpty {
-            return normalized + "#" + fragment
-        }
-        return normalized
+        return appendingFragment(components.fragment, to: normalized)
     }
 
     func readerURL(for href: String, bookId: UUID, relativeTo basePath: String? = nil) -> URL? {
         guard let path = normalizedResourcePath(href, relativeTo: basePath) else {
             return nil
         }
-        return URL(string: "readerflow://book/\(bookId.uuidString)/\(path)")
+        return readerURL(forNormalizedResourcePath: path, bookId: bookId)
+    }
+
+    func readerURL(forNormalizedResourcePath normalizedPath: String, bookId: UUID) -> URL? {
+        let parts = normalizedPath.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        let resourcePath = parts.first.map(String.init) ?? normalizedPath
+        let fragment = parts.count > 1 ? String(parts[1]) : nil
+        let resourceParts = pathParts(resourcePath)
+        guard !resourceParts.isEmpty else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = "readerflow"
+        components.host = "book"
+        components.path = "/" + ([bookId.uuidString] + resourceParts).joined(separator: "/")
+        components.fragment = fragment?.isEmpty == false ? fragment : nil
+        return components.url
     }
 
     private func pathParts(_ path: String) -> [String] {
         path.split(separator: "/")
             .map(String.init)
             .filter { !$0.isEmpty }
+    }
+
+    private func normalizedBaseResourceParts(_ basePath: String, rootParts: [String]) -> [String]? {
+        guard let decodedBasePath = basePath.removingPercentEncoding,
+              !decodedBasePath.hasPrefix("/")
+        else {
+            return nil
+        }
+
+        var parts: [String] = []
+        for part in pathParts(decodedBasePath) {
+            switch part {
+            case ".":
+                continue
+            case "..":
+                return nil
+            default:
+                parts.append(part)
+            }
+        }
+
+        if parts.starts(with: rootParts) {
+            return parts
+        }
+        return rootParts + parts
+    }
+
+    private func appendingFragment(_ fragment: String?, to normalizedPath: String) -> String {
+        guard let fragment, !fragment.isEmpty else {
+            return normalizedPath
+        }
+        return normalizedPath + "#" + fragment
     }
 }

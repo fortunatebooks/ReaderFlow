@@ -15,6 +15,20 @@ struct ContinuousDocumentBuilder {
         settings: ReaderSettingsEntity,
         bridgeToken: String
     ) -> String {
+        buildDocument(
+            title: title,
+            chapters: chapters,
+            settings: ReaderDocumentSettings(settings),
+            bridgeToken: bridgeToken
+        )
+    }
+
+    func buildDocument(
+        title: String,
+        chapters: [ContinuousDocumentChapter],
+        settings: ReaderDocumentSettings,
+        bridgeToken: String
+    ) -> String {
         let chapterHTML = chapters.enumerated()
             .map { index, chapter in
                 sectionHTML(index: index, chapter: chapter)
@@ -66,6 +80,21 @@ struct ContinuousDocumentChapter: Hashable {
     var href: String
     var title: String
     var bodyHTML: String
+}
+
+struct ReaderDocumentSettings: Hashable {
+    var textSize: Double
+    var lineHeight: Double
+
+    init(textSize: Double = 18, lineHeight: Double = 1.55) {
+        self.textSize = textSize
+        self.lineHeight = lineHeight
+    }
+
+    init(_ settings: ReaderSettingsEntity) {
+        textSize = settings.textSize
+        lineHeight = settings.lineHeight
+    }
 }
 
 extension String {
