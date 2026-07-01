@@ -41,3 +41,5 @@ fastlane/test_output/
 Exports/
 Books/
 
+# Local planning artifacts
+docs/implementation-plan.md
