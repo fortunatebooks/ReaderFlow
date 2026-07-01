@@ -95,6 +95,10 @@ struct EPUBContentLoaderTests {
             <html xmlns="http://www.w3.org/1999/xhtml">
               <head>
                 <title>Chapter One</title>
+                <link rel="stylesheet" href="../Styles/book.css"/>
+                <link rel="stylesheet" href="../Styles/print.css" media="print"/>
+                <link rel="stylesheet" href="../Styles/bad-media.css" media="screen}"/>
+                <link rel="alternate stylesheet" href="../Styles/alternate.css"/>
               </head>
               <body>
                 <h1>Heading Fallback</h1>
@@ -119,6 +123,9 @@ struct EPUBContentLoaderTests {
         try write(
             """
             <html xmlns="http://www.w3.org/1999/xhtml">
+              <head>
+                <link rel="stylesheet" href="../Styles/chapter2.css"/>
+              </head>
               <body>
                 <h2>Second Chapter</h2>
                 <p id="next">Second text.</p>
@@ -143,6 +150,79 @@ struct EPUBContentLoaderTests {
                 .appendingPathComponent("OEBPS")
                 .appendingPathComponent("Text")
                 .appendingPathComponent("chapter#1.xhtml")
+        )
+        try write(
+            """
+            @import "reset.css";
+            @import "reset.css";
+            @import url("https://example.com/remote.css");
+            @import "bad-import-media.css" screen};
+            body { color: #111; }
+            .chapter { background-image: url("../Images/dropcap.png"); }
+            p::before { content: "{"; }
+            .commented { content: "ok"; /* } */ color: #333; }
+            } body { color: red; }
+            .remote { background-image: url("https://example.com/remote.png"); }
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Styles")
+                .appendingPathComponent("book.css")
+        )
+        try write(
+            """
+            p { font-style: italic; }
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Styles")
+                .appendingPathComponent("chapter2.css")
+        )
+        try write(
+            """
+            p { color: black; }
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Styles")
+                .appendingPathComponent("print.css")
+        )
+        try write(
+            """
+            .bad-media { color: red; }
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Styles")
+                .appendingPathComponent("bad-media.css")
+        )
+        try write(
+            """
+            .bad-import-media { color: red; }
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Styles")
+                .appendingPathComponent("bad-import-media.css")
+        )
+        try write(
+            """
+            .alternate { color: red; }
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Styles")
+                .appendingPathComponent("alternate.css")
+        )
+        try write(
+            """
+            .reset { margin: 0; }
+            .ornament { background: url("../Images/ornament.svg"); }
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("Styles")
+                .appendingPathComponent("reset.css")
         )
 
         let bookId = try #require(UUID(uuidString: "22222222-2222-2222-2222-222222222222"))
@@ -203,6 +283,25 @@ struct EPUBContentLoaderTests {
         #expect(chapters[0].bodyHTML.contains("id=\"rf-spine-0-local-note\""))
         #expect(chapters[0].bodyHTML.contains("href=\"#rf-spine-0-local-note\""))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/bg.jpg"))
+        #expect(chapters[0].bodyHTML.contains("data-readerflow-author-stylesheet=\"../Styles/book.css\""))
+        #expect(chapters[0].bodyHTML.contains("#rf-spine-0 .chapter"))
+        #expect(chapters[0].bodyHTML.contains("#rf-spine-0 .reset"))
+        #expect(chapters[0].bodyHTML.components(separatedBy: "#rf-spine-0 .reset").count - 1 == 2)
+        #expect(chapters[0].bodyHTML.contains("#rf-spine-0{ color: #111; }"))
+        #expect(chapters[0].bodyHTML.contains("#rf-spine-0 p::before{ content: \"{\"; }"))
+        #expect(chapters[0].bodyHTML.contains("#rf-spine-0 .commented{ content: \"ok\"; /* } */ color: #333; }"))
+        #expect(chapters[0].bodyHTML.contains("@media print"))
+        #expect(chapters[0].bodyHTML.contains("#rf-spine-0 p{ color: black; }"))
+        #expect(!chapters[0].bodyHTML.contains(".bad-media"))
+        #expect(!chapters[0].bodyHTML.contains(".bad-import-media"))
+        #expect(!chapters[0].bodyHTML.contains(".alternate"))
+        #expect(!chapters[0].bodyHTML.contains("} body"))
+        #expect(!chapters[0].bodyHTML.contains("color: red"))
+        #expect(chapters[1].bodyHTML.contains("#rf-spine-1 p{ font-style: italic; }"))
+        #expect(!chapters[0].bodyHTML.contains("#rf-spine-1"))
+        #expect(!chapters[1].bodyHTML.contains("#rf-spine-0"))
+        #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/dropcap.png"))
+        #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/ornament.svg"))
         #expect(!chapters[0].bodyHTML.localizedCaseInsensitiveContains("<script"))
         #expect(!chapters[0].bodyHTML.contains("https://example.com"))
         #expect(!chapters[0].bodyHTML.contains("../../secret.png"))

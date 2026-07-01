@@ -4,6 +4,8 @@ import SwiftSoup
 struct EPUBContentLoader {
     private let fileManager: FileManager
     private let sanitizer: EPUBContentSanitizer
+    private let maximumStylesheetBytes = 512 * 1024
+    private let maximumStylesheetImportDepth = 4
 
     init(
         fileManager: FileManager = .default,
@@ -22,7 +24,8 @@ struct EPUBContentLoader {
         let chapterItems = package.readingOrder.filter { $0.linear && isHTML($0.mediaType) }
         let internalLinkTargets = internalLinkTargets(for: chapterItems, resolver: resolver)
 
-        return try chapterItems.map { item in
+        return try chapterItems.enumerated().map { index, item in
+            let chapterID = "rf-spine-\(index)"
             let currentTarget = internalLinkTarget(for: item.href, resolver: resolver, targets: internalLinkTargets)
             let chapterURL = try chapterFileURL(
                 for: item,
@@ -50,13 +53,25 @@ struct EPUBContentLoader {
                 resolver: resolver,
                 bookId: bookId,
                 internalLinkTargets: internalLinkTargets,
-                currentTarget: currentTarget
+                currentTarget: currentTarget,
+                chapterID: chapterID
             )
+            let authorStyles = authorStylesheetHTML(
+                document: document,
+                baseHref: item.href,
+                expandedRootURL: expandedRootURL,
+                resolver: resolver,
+                bookId: bookId,
+                chapterID: chapterID
+            )
+            let chapterHTML = [authorStyles, body.html()]
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .joined(separator: "\n")
 
             return try ContinuousDocumentChapter(
                 href: item.href,
                 title: chapterTitle(document: document, body: body, fallback: item.href),
-                bodyHTML: sanitizer.sanitizeHTML(body.html())
+                bodyHTML: sanitizer.sanitizeHTML(chapterHTML)
             )
         }
     }
@@ -112,7 +127,8 @@ struct EPUBContentLoader {
         resolver: EPUBResourceResolver,
         bookId: UUID,
         internalLinkTargets: [String: InternalLinkTarget],
-        currentTarget: InternalLinkTarget?
+        currentTarget: InternalLinkTarget?,
+        chapterID: String
     ) throws {
         try rewriteURLAttribute(
             "href",
@@ -136,7 +152,54 @@ struct EPUBContentLoader {
         )
         try rewriteSrcsetAttributes(in: body, baseHref: baseHref, resolver: resolver, bookId: bookId)
         try rewriteInlineStyles(in: body, baseHref: baseHref, resolver: resolver, bookId: bookId)
-        try rewriteStyleElements(in: body, baseHref: baseHref, resolver: resolver, bookId: bookId)
+        try rewriteStyleElements(in: body, baseHref: baseHref, resolver: resolver, bookId: bookId, chapterID: chapterID)
+    }
+
+    private func authorStylesheetHTML(
+        document: Document,
+        baseHref: String,
+        expandedRootURL: URL,
+        resolver: EPUBResourceResolver,
+        bookId: UUID,
+        chapterID: String
+    ) -> String {
+        guard let links = try? document.select("link[href]").array() else {
+            return ""
+        }
+
+        return links.compactMap { element -> String? in
+            guard let rel = try? element.attr("rel").lowercased(),
+                  let href = try? element.attr("href")
+            else {
+                return nil
+            }
+            let relTokens = rel.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard relTokens.contains("stylesheet"),
+                  !relTokens.contains("alternate"),
+                  let css = stylesheetCSS(
+                      href: href,
+                      baseHref: baseHref,
+                      expandedRootURL: expandedRootURL,
+                      resolver: resolver,
+                      bookId: bookId
+                  ),
+                  !css.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
+                return nil
+            }
+
+            let media = (try? element.attr("media").trimmingCharacters(in: .whitespacesAndNewlines)) ?? ""
+            let scopedCSS = wrapCSSForMediaIfNeeded(
+                scopeAuthorCSS(css, chapterID: chapterID),
+                media: media
+            )
+            return """
+            <style data-readerflow-author-stylesheet="\(href.htmlEscaped)">
+            \(scopedCSS.escapedForStyleElement)
+            </style>
+            """
+        }
+        .joined(separator: "\n")
     }
 
     private func rewriteURLAttribute(
@@ -243,7 +306,8 @@ struct EPUBContentLoader {
         in body: Element,
         baseHref: String,
         resolver: EPUBResourceResolver,
-        bookId: UUID
+        bookId: UUID,
+        chapterID: String
     ) throws {
         for element in try body.select("style").array() {
             let rewritten = try rewriteCSSURLs(
@@ -252,8 +316,415 @@ struct EPUBContentLoader {
                 resolver: resolver,
                 bookId: bookId
             )
-            try element.html(rewritten)
+            try element.html(scopeAuthorCSS(rewritten, chapterID: chapterID).escapedForStyleElement)
         }
+    }
+
+    private func stylesheetCSS(
+        href: String,
+        baseHref: String,
+        expandedRootURL: URL,
+        resolver: EPUBResourceResolver,
+        bookId: UUID
+    ) -> String? {
+        var importStack: Set<String> = []
+        return stylesheetCSS(
+            href: href,
+            baseHref: baseHref,
+            expandedRootURL: expandedRootURL,
+            resolver: resolver,
+            bookId: bookId,
+            importStack: &importStack,
+            depth: 0
+        )
+    }
+
+    private func stylesheetCSS(
+        href: String,
+        baseHref: String,
+        expandedRootURL: URL,
+        resolver: EPUBResourceResolver,
+        bookId: UUID,
+        importStack: inout Set<String>,
+        depth: Int
+    ) -> String? {
+        guard depth <= maximumStylesheetImportDepth,
+              let normalizedPath = resolver.normalizedResourcePath(href, relativeTo: baseHref)
+        else {
+            return nil
+        }
+
+        let resourcePath = resourcePath(from: normalizedPath)
+        guard !importStack.contains(resourcePath),
+              let fileURL = EPUBResourceResolver.fileURL(forNormalizedResourcePath: resourcePath, rootURL: expandedRootURL),
+              fileManager.fileExists(atPath: fileURL.path),
+              let css = readStylesheet(at: fileURL)
+        else {
+            return nil
+        }
+        importStack.insert(resourcePath)
+        defer {
+            importStack.remove(resourcePath)
+        }
+
+        let inlinedImports = inlineCSSImports(
+            css,
+            baseHref: normalizedPath,
+            expandedRootURL: expandedRootURL,
+            resolver: resolver,
+            bookId: bookId,
+            importStack: &importStack,
+            depth: depth
+        )
+        return rewriteCSSURLs(inlinedImports, baseHref: normalizedPath, resolver: resolver, bookId: bookId)
+    }
+
+    private func readStylesheet(at url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              data.count <= maximumStylesheetBytes
+        else {
+            return nil
+        }
+
+        return String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .utf16)
+            ?? String(data: data, encoding: .isoLatin1)
+    }
+
+    private func inlineCSSImports(
+        _ css: String,
+        baseHref: String,
+        expandedRootURL: URL,
+        resolver: EPUBResourceResolver,
+        bookId: UUID,
+        importStack: inout Set<String>,
+        depth: Int
+    ) -> String {
+        let patterns = [
+            (
+                pattern: #"@import\s+(?:url\(\s*)?(['"])(.*?)\1\s*\)?\s*([^;]*);"#,
+                hrefGroup: 2,
+                mediaGroup: 3
+            ),
+            (
+                pattern: #"@import\s+url\(\s*([^'"\)\s][^\)]*?)\s*\)\s*([^;]*);"#,
+                hrefGroup: 1,
+                mediaGroup: 2
+            ),
+        ]
+        var output = css
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern.pattern, options: [.caseInsensitive]) else {
+                continue
+            }
+            output = replaceCSSImports(
+                in: output,
+                regex: regex,
+                hrefGroup: pattern.hrefGroup,
+                mediaGroup: pattern.mediaGroup,
+                baseHref: baseHref,
+                expandedRootURL: expandedRootURL,
+                resolver: resolver,
+                bookId: bookId,
+                importStack: &importStack,
+                depth: depth
+            )
+        }
+        return output
+    }
+
+    private func replaceCSSImports(
+        in css: String,
+        regex: NSRegularExpression,
+        hrefGroup: Int,
+        mediaGroup: Int,
+        baseHref: String,
+        expandedRootURL: URL,
+        resolver: EPUBResourceResolver,
+        bookId: UUID,
+        importStack: inout Set<String>,
+        depth: Int
+    ) -> String {
+        let input = css as NSString
+        var output = css
+        for match in regex.matches(in: css, range: NSRange(location: 0, length: input.length)).reversed() {
+            guard match.numberOfRanges > max(hrefGroup, mediaGroup) else { continue }
+            let hrefRange = match.range(at: hrefGroup)
+            let mediaRange = match.range(at: mediaGroup)
+            guard hrefRange.location != NSNotFound else { continue }
+            let href = input.substring(with: hrefRange).trimmingCharacters(in: .whitespacesAndNewlines)
+            let media = mediaRange.location == NSNotFound
+                ? ""
+                : input.substring(with: mediaRange).trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard let importedCSS = stylesheetCSS(
+                href: href,
+                baseHref: baseHref,
+                expandedRootURL: expandedRootURL,
+                resolver: resolver,
+                bookId: bookId,
+                importStack: &importStack,
+                depth: depth + 1
+            ) else {
+                output = (output as NSString).replacingCharacters(in: match.range, with: "")
+                continue
+            }
+
+            let replacement: String = if media.isEmpty {
+                importedCSS
+            } else if let sanitizedMedia = sanitizedMediaQuery(media) {
+                "@media \(sanitizedMedia) {\n\(importedCSS)\n}"
+            } else {
+                ""
+            }
+            output = (output as NSString).replacingCharacters(in: match.range, with: replacement)
+        }
+        return output
+    }
+
+    private func wrapCSSForMediaIfNeeded(_ css: String, media: String) -> String {
+        let trimmedMedia = media.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMedia.isEmpty,
+              trimmedMedia.lowercased() != "all"
+        else {
+            return css
+        }
+        guard let sanitizedMedia = sanitizedMediaQuery(trimmedMedia) else {
+            return ""
+        }
+        return "@media \(sanitizedMedia) {\n\(css)\n}"
+    }
+
+    private func sanitizedMediaQuery(_ media: String) -> String? {
+        let trimmed = media.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed.range(of: #"^[A-Za-z0-9_\-\s,():./]+$"#, options: .regularExpression) != nil
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private func scopeAuthorCSS(_ css: String, chapterID: String) -> String {
+        scopeCSSBlock(css, chapterID: chapterID)
+    }
+
+    private func scopeCSSBlock(_ css: String, chapterID: String) -> String {
+        var output = ""
+        var cursor = css.startIndex
+
+        while let openBrace = nextRuleOpenBrace(in: css, from: cursor) {
+            let selectorRange = cursor ..< openBrace
+            let selector = String(css[selectorRange])
+            guard let closeBrace = matchingCloseBrace(in: css, openingAt: openBrace) else {
+                return output
+            }
+
+            let bodyStart = css.index(after: openBrace)
+            let body = String(css[bodyStart ..< closeBrace])
+            output += scopedRule(selector: selector, body: body, chapterID: chapterID)
+            cursor = css.index(after: closeBrace)
+        }
+
+        output += css[cursor...]
+        return output
+    }
+
+    private func nextRuleOpenBrace(in css: String, from startIndex: String.Index) -> String.Index? {
+        var index = startIndex
+        var stringDelimiter: Character?
+        var isEscaped = false
+        var isInComment = false
+
+        while index < css.endIndex {
+            let character = css[index]
+            let nextIndex = css.index(after: index)
+            let nextCharacter = nextIndex < css.endIndex ? css[nextIndex] : nil
+
+            if isInComment {
+                if character == "*", nextCharacter == "/" {
+                    isInComment = false
+                    index = css.index(after: nextIndex)
+                    continue
+                }
+                index = nextIndex
+                continue
+            }
+
+            if let delimiter = stringDelimiter {
+                if isEscaped {
+                    isEscaped = false
+                } else if character == "\\" {
+                    isEscaped = true
+                } else if character == delimiter {
+                    stringDelimiter = nil
+                }
+                index = nextIndex
+                continue
+            }
+
+            if character == "/", nextCharacter == "*" {
+                isInComment = true
+                index = css.index(after: nextIndex)
+                continue
+            }
+
+            if character == "\"" || character == "'" {
+                stringDelimiter = character
+                index = nextIndex
+                continue
+            }
+
+            if character == "{" {
+                return index
+            }
+            index = nextIndex
+        }
+        return nil
+    }
+
+    private func scopedRule(selector: String, body: String, chapterID: String) -> String {
+        let trimmedSelector = selector.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSelector.isEmpty,
+              !trimmedSelector.contains("{"),
+              !trimmedSelector.contains("}")
+        else {
+            return ""
+        }
+
+        let lowercased = trimmedSelector.lowercased()
+        if lowercased.hasPrefix("@media")
+            || lowercased.hasPrefix("@supports")
+            || lowercased.hasPrefix("@container")
+        {
+            return "\(selector){\(scopeCSSBlock(body, chapterID: chapterID))}"
+        }
+
+        if lowercased.hasPrefix("@font-face")
+            || lowercased.hasPrefix("@keyframes")
+            || lowercased.hasPrefix("@-webkit-keyframes")
+        {
+            return "\(selector){\(body)}"
+        }
+
+        if lowercased.hasPrefix("@page") {
+            return ""
+        }
+
+        let scopedSelectors = selector
+            .split(separator: ",", omittingEmptySubsequences: false)
+            .map { scopeSelector(String($0), chapterID: chapterID) }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: ", ")
+
+        guard !scopedSelectors.isEmpty else {
+            return ""
+        }
+        return "\(scopedSelectors){\(body)}"
+    }
+
+    private func matchingCloseBrace(in css: String, openingAt openBrace: String.Index) -> String.Index? {
+        var depth = 0
+        var index = openBrace
+        var stringDelimiter: Character?
+        var isEscaped = false
+        var isInComment = false
+
+        while index < css.endIndex {
+            let character = css[index]
+            let nextIndex = css.index(after: index)
+            let nextCharacter = nextIndex < css.endIndex ? css[nextIndex] : nil
+
+            if isInComment {
+                if character == "*", nextCharacter == "/" {
+                    isInComment = false
+                    index = css.index(after: nextIndex)
+                    continue
+                }
+                index = nextIndex
+                continue
+            }
+
+            if let delimiter = stringDelimiter {
+                if isEscaped {
+                    isEscaped = false
+                } else if character == "\\" {
+                    isEscaped = true
+                } else if character == delimiter {
+                    stringDelimiter = nil
+                }
+                index = nextIndex
+                continue
+            }
+
+            if character == "/", nextCharacter == "*" {
+                isInComment = true
+                index = css.index(after: nextIndex)
+                continue
+            }
+
+            if character == "\"" || character == "'" {
+                stringDelimiter = character
+                index = nextIndex
+                continue
+            }
+
+            switch css[index] {
+            case "{":
+                depth += 1
+            case "}":
+                depth -= 1
+                if depth == 0 {
+                    return index
+                }
+            default:
+                break
+            }
+            index = nextIndex
+        }
+        return nil
+    }
+
+    private func scopeSelector(_ selector: String, chapterID: String) -> String {
+        let leadingWhitespace = String(selector.prefix { $0.isWhitespace })
+        let trimmed = selector.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        let scope = "#\(chapterID)"
+        let lowercased = trimmed.lowercased()
+        if lowercased == "html" || lowercased == "body" || lowercased == ":root" {
+            return leadingWhitespace + scope
+        }
+
+        for rootSelector in ["html", "body", ":root"] {
+            if let replaced = replacingRootSelector(rootSelector, in: trimmed, scope: scope) {
+                return leadingWhitespace + replaced
+            }
+        }
+
+        if trimmed.hasPrefix(scope) {
+            return leadingWhitespace + trimmed
+        }
+        return leadingWhitespace + scope + " " + trimmed
+    }
+
+    private func replacingRootSelector(_ rootSelector: String, in selector: String, scope: String) -> String? {
+        guard selector.lowercased().hasPrefix(rootSelector) else {
+            return nil
+        }
+
+        let boundaryIndex = selector.index(selector.startIndex, offsetBy: rootSelector.count)
+        guard boundaryIndex == selector.endIndex || isSelectorBoundary(selector[boundaryIndex]) else {
+            return nil
+        }
+        return scope + String(selector[boundaryIndex...])
+    }
+
+    private func isSelectorBoundary(_ character: Character) -> Bool {
+        String(character).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || [">", "+", "~", ".", "#", ":", "["].contains(String(character))
     }
 
     private func rewriteCSSURLs(
@@ -272,6 +743,9 @@ struct EPUBContentLoader {
         for match in regex.matches(in: css, range: NSRange(location: 0, length: input.length)).reversed() {
             guard match.numberOfRanges >= 3 else { continue }
             let rawValue = input.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if rawValue.lowercased().hasPrefix("readerflow://") {
+                continue
+            }
             guard !shouldPreserveLocalFragment(rawValue),
                   let rewritten = readerURL(for: rawValue, bookId: bookId, relativeTo: baseHref, resolver: resolver)
             else {
@@ -425,6 +899,12 @@ struct EPUBContentLoader {
         }
 
         return fallback
+    }
+}
+
+private extension String {
+    var escapedForStyleElement: String {
+        replacingOccurrences(of: "</", with: "<\\/")
     }
 }
 
