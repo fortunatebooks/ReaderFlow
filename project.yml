@@ -29,8 +29,14 @@ targets:
       - path: ReaderFlow
         excludes:
           - Resources/**
-    resources:
-      - path: ReaderFlow/Resources
+      - path: ReaderFlow/Resources/Assets.xcassets
+        buildPhase: resources
+      - path: ReaderFlow/Resources/ReaderWeb
+        buildPhase: resources
+        type: folder
+      - path: ReaderFlow/Resources/Fonts
+        buildPhase: resources
+        type: folder
     dependencies:
       - package: Readium
         product: ReadiumShared

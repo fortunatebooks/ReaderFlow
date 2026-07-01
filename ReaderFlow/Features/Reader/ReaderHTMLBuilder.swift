@@ -41,6 +41,62 @@ enum ReaderHTMLBuilder {
 
 enum ReaderWebAssets {
     static let css = """
+    @font-face {
+      font-family: "ReaderFlow Atkinson Hyperlegible";
+      src: url("readerflow://app/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Regular.otf") format("opentype");
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "ReaderFlow Atkinson Hyperlegible";
+      src: url("readerflow://app/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Italic.otf") format("opentype");
+      font-weight: 400;
+      font-style: italic;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "ReaderFlow Atkinson Hyperlegible";
+      src: url("readerflow://app/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Bold.otf") format("opentype");
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "ReaderFlow Atkinson Hyperlegible";
+      src: url("readerflow://app/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-BoldItalic.otf") format("opentype");
+      font-weight: 700;
+      font-style: italic;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "ReaderFlow Literata";
+      src: url("readerflow://app/fonts/Literata/Literata.ttf") format("truetype");
+      font-weight: 200 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "ReaderFlow Literata";
+      src: url("readerflow://app/fonts/Literata/Literata-Italic.ttf") format("truetype");
+      font-weight: 200 900;
+      font-style: italic;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "ReaderFlow Source Serif 4";
+      src: url("readerflow://app/fonts/SourceSerif4/SourceSerif4Variable-Roman.ttf") format("truetype");
+      font-weight: 200 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "ReaderFlow Source Serif 4";
+      src: url("readerflow://app/fonts/SourceSerif4/SourceSerif4Variable-Italic.ttf") format("truetype");
+      font-weight: 200 900;
+      font-style: italic;
+      font-display: swap;
+    }
     html, body {
       margin: 0;
       padding: 0;

@@ -194,6 +194,12 @@ private extension ReaderFontFamily {
             "ui-serif, Georgia, \"Times New Roman\", serif"
         case .systemSans:
             "-apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Helvetica Neue\", sans-serif"
+        case .atkinsonHyperlegible:
+            "\"ReaderFlow Atkinson Hyperlegible\", -apple-system, BlinkMacSystemFont, \"SF Pro Text\", sans-serif"
+        case .literata:
+            "\"ReaderFlow Literata\", ui-serif, Georgia, \"Times New Roman\", serif"
+        case .sourceSerif4:
+            "\"ReaderFlow Source Serif 4\", ui-serif, Georgia, \"Times New Roman\", serif"
         case .georgia:
             "Georgia, \"Times New Roman\", ui-serif, serif"
         case .palatino:

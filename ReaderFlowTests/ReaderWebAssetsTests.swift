@@ -18,6 +18,15 @@ struct ReaderWebAssetsTests {
         #expect(javascript.contains("shouldSuppressDuplicateSelection"))
     }
 
+    @Test func readerCSSDeclaresBundledFontFaces() {
+        let css = ReaderWebAssets.css
+
+        #expect(css.contains("@font-face"))
+        #expect(css.contains("readerflow://app/fonts/AtkinsonHyperlegible/AtkinsonHyperlegible-Regular.otf"))
+        #expect(css.contains("readerflow://app/fonts/Literata/Literata.ttf"))
+        #expect(css.contains("readerflow://app/fonts/SourceSerif4/SourceSerif4Variable-Roman.ttf"))
+    }
+
     @Test func readerScriptMarksRestoreAndNavigationScrollsAsProgrammatic() {
         let javascript = normalizedScript
 

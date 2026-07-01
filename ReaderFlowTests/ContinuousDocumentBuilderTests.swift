@@ -57,6 +57,16 @@ struct ContinuousDocumentBuilderTests {
         #expect(css.contains("--rf-horizontal-padding: 28px;"))
     }
 
+    @Test func emitsBundledReaderFontStacks() {
+        let atkinsonCSS = ReaderDocumentSettings(fontFamily: .atkinsonHyperlegible).cssCustomProperties
+        let literataCSS = ReaderDocumentSettings(fontFamily: .literata).cssCustomProperties
+        let sourceSerifCSS = ReaderDocumentSettings(fontFamily: .sourceSerif4).cssCustomProperties
+
+        #expect(atkinsonCSS.contains("\"ReaderFlow Atkinson Hyperlegible\""))
+        #expect(literataCSS.contains("\"ReaderFlow Literata\""))
+        #expect(sourceSerifCSS.contains("\"ReaderFlow Source Serif 4\""))
+    }
+
     @Test func normalizesLanguageMetadataForHTMLLangAttribute() {
         let builder = ContinuousDocumentBuilder(
             sanitizer: EPUBContentSanitizer(),

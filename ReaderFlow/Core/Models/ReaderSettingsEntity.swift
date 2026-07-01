@@ -55,6 +55,9 @@ enum ReaderTheme: String, Codable, CaseIterable, Identifiable {
 enum ReaderFontFamily: String, Codable, CaseIterable, Identifiable {
     case systemSerif
     case systemSans
+    case atkinsonHyperlegible
+    case literata
+    case sourceSerif4
     case georgia
     case palatino
     case avenirNext
@@ -68,6 +71,9 @@ enum ReaderFontFamily: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .systemSerif: "System Serif"
         case .systemSans: "System Sans"
+        case .atkinsonHyperlegible: "Atkinson Hyperlegible"
+        case .literata: "Literata"
+        case .sourceSerif4: "Source Serif 4"
         case .georgia: "Georgia"
         case .palatino: "Palatino"
         case .avenirNext: "Avenir Next"

@@ -60,12 +60,32 @@ final class ReaderResourceSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     private func resolveAppResource(_ url: URL) -> URL? {
-        let resourceName = url.deletingPathExtension().lastPathComponent
-        let resourceExtension = url.pathExtension
+        let parts = urlPathParts(url)
+        guard !parts.isEmpty else { return nil }
+        if parts.first == "fonts" {
+            return resolveBundledFont(parts: Array(parts.dropFirst()))
+        }
+        guard parts.count == 1 else { return nil }
+        let filename = parts[0]
+        let resourceName = (filename as NSString).deletingPathExtension
+        let resourceExtension = (filename as NSString).pathExtension
         return bundle.url(
             forResource: resourceName,
             withExtension: resourceExtension.isEmpty ? nil : resourceExtension,
             subdirectory: "ReaderWeb"
+        )
+    }
+
+    private func resolveBundledFont(parts: [String]) -> URL? {
+        guard parts.count >= 2 else { return nil }
+        let filename = parts.last ?? ""
+        let resourceName = (filename as NSString).deletingPathExtension
+        let resourceExtension = (filename as NSString).pathExtension
+        let subdirectory = (["Fonts"] + parts.dropLast()).joined(separator: "/")
+        return bundle.url(
+            forResource: resourceName,
+            withExtension: resourceExtension.isEmpty ? nil : resourceExtension,
+            subdirectory: subdirectory
         )
     }
 
@@ -74,11 +94,10 @@ final class ReaderResourceSchemeHandler: NSObject, WKURLSchemeHandler {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return nil
         }
-        let parts = components.percentEncodedPath
-            .split(separator: "/")
-            .map(String.init)
+        let parts = ReaderResourcePath.encodedParts(fromPercentEncodedPath: components.percentEncodedPath)
         guard parts.count >= 2 else { return nil }
-        guard expectedBookId.map({ $0.uuidString == parts[0] }) ?? true else {
+        let bookIdPart = parts[0].removingPercentEncoding ?? parts[0]
+        guard expectedBookId.map({ $0.uuidString == bookIdPart }) ?? true else {
             return nil
         }
         let normalizedPath = parts.dropFirst().joined(separator: "/")
@@ -92,7 +111,27 @@ final class ReaderResourceSchemeHandler: NSObject, WKURLSchemeHandler {
         return candidate
     }
 
+    private func urlPathParts(_ url: URL) -> [String] {
+        ReaderResourcePath.parts(fromPercentEncodedPath: url.percentEncodedPath)
+    }
+
+    private func urlPathParts(_ percentEncodedPath: String) -> [String] {
+        ReaderResourcePath.parts(fromPercentEncodedPath: percentEncodedPath)
+    }
+
     private func mimeType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "otf":
+            return "font/otf"
+        case "ttf":
+            return "font/ttf"
+        case "woff":
+            return "font/woff"
+        case "woff2":
+            return "font/woff2"
+        default:
+            break
+        }
         if let type = UTType(filenameExtension: url.pathExtension),
            let mimeType = type.preferredMIMEType
         {
@@ -110,6 +149,44 @@ final class ReaderResourceSchemeHandler: NSObject, WKURLSchemeHandler {
         default:
             return "application/octet-stream"
         }
+    }
+}
+
+enum ReaderResourcePath {
+    static func parts(fromPercentEncodedPath percentEncodedPath: String) -> [String] {
+        validatedParts(fromPercentEncodedPath: percentEncodedPath).map(\.decoded)
+    }
+
+    static func encodedParts(fromPercentEncodedPath percentEncodedPath: String) -> [String] {
+        validatedParts(fromPercentEncodedPath: percentEncodedPath).map(\.encoded)
+    }
+
+    private static func validatedParts(fromPercentEncodedPath percentEncodedPath: String) -> [PathPart] {
+        var parts: [PathPart] = []
+        for rawPart in percentEncodedPath.split(separator: "/") {
+            let encodedPart = String(rawPart)
+            guard let decodedPart = String(rawPart).removingPercentEncoding,
+                  isSafePathPart(decodedPart)
+            else {
+                return []
+            }
+            parts.append(PathPart(encoded: encodedPart, decoded: decodedPart))
+        }
+        return parts
+    }
+
+    private static func isSafePathPart(_ value: String) -> Bool {
+        !value.isEmpty
+            && value != "."
+            && value != ".."
+            && !value.contains("/")
+            && !value.contains("\\")
+            && !value.contains("\u{0}")
+    }
+
+    private struct PathPart {
+        var encoded: String
+        var decoded: String
     }
 }
 
