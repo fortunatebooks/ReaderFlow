@@ -7,7 +7,7 @@ enum ReaderHTMLBuilder {
         let escapedBridgeToken = bridgeToken.htmlEscaped
         return """
         <!doctype html>
-        <html>
+        <html lang="\(ReaderHTMLLanguage.attributeValue(for: book.languageCode))" dir="auto">
         <head>
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
@@ -17,7 +17,7 @@ enum ReaderHTMLBuilder {
         </head>
         <body>
           <main id="book">
-            <section id="rf-spine-0" class="rf-chapter" data-spine-index="0" data-href="placeholder.xhtml" data-normalized-href="placeholder.xhtml" data-title="Imported Book">
+            <section id="rf-spine-0" class="rf-chapter" dir="auto" data-spine-index="0" data-href="placeholder.xhtml" data-normalized-href="placeholder.xhtml" data-title="Imported Book">
               <h1>\(escapedTitle)</h1>
               <p>This EPUB has been imported. The next implementation stage replaces this placeholder with sanitized EPUB chapter content from the continuous document builder.</p>
               <p>Select text here to exercise the excerpt bridge while the full EPUB renderer is being connected.</p>

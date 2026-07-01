@@ -15,7 +15,8 @@ struct ContinuousDocumentBuilder {
         settings: ReaderSettingsEntity,
         bridgeToken: String,
         bookId: UUID? = nil,
-        bookFingerprint: String = ""
+        bookFingerprint: String = "",
+        languageCode: String? = nil
     ) -> String {
         buildDocument(
             title: title,
@@ -23,7 +24,8 @@ struct ContinuousDocumentBuilder {
             settings: ReaderDocumentSettings(settings),
             bridgeToken: bridgeToken,
             bookId: bookId,
-            bookFingerprint: bookFingerprint
+            bookFingerprint: bookFingerprint,
+            languageCode: languageCode
         )
     }
 
@@ -33,7 +35,8 @@ struct ContinuousDocumentBuilder {
         settings: ReaderDocumentSettings,
         bridgeToken: String,
         bookId: UUID? = nil,
-        bookFingerprint: String = ""
+        bookFingerprint: String = "",
+        languageCode: String? = nil
     ) -> String {
         let chapterHTML = chapters.enumerated()
             .map { index, chapter in
@@ -43,7 +46,7 @@ struct ContinuousDocumentBuilder {
 
         return """
         <!doctype html>
-        <html>
+        <html lang="\(ReaderHTMLLanguage.attributeValue(for: languageCode))" dir="auto">
         <head>
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
@@ -75,7 +78,7 @@ struct ContinuousDocumentBuilder {
         let href = chapter.href.htmlEscaped
         let normalizedHref = (resolver.normalizedResourcePath(chapter.href) ?? chapter.href).htmlEscaped
         return """
-        <section id="rf-spine-\(index)" class="rf-chapter" data-spine-index="\(index)" data-href="\(href)" data-normalized-href="\(normalizedHref)" data-title="\(title)">
+        <section id="rf-spine-\(index)" class="rf-chapter" dir="auto" data-spine-index="\(index)" data-href="\(href)" data-normalized-href="\(normalizedHref)" data-title="\(title)">
           \(sanitizedBody)
         </section>
         """
