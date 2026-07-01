@@ -25,22 +25,26 @@ struct ExcerptTextExporter {
 
         """
 
-        for excerpt in excerpts.sorted(by: { $0.sortProgress < $1.sortProgress }) {
+        for excerpt in sortedExcerpts(excerpts) {
+            let selectedText = normalizedBodyText(excerpt.selectedText)
+            let contextBefore = normalizedInlineText(excerpt.contextBefore)
+            let contextAfter = normalizedInlineText(excerpt.contextAfter)
+            let contextSelection = normalizedInlineText(selectedText)
             output += """
             Chapter: \(excerpt.chapterTitle ?? "Unknown")
-            Location: \(Int(excerpt.sortProgress * 100))%
+            Location: \(locationDescription(for: excerpt))
             Saved: \(excerpt.createdAt.formatted(date: .abbreviated, time: .shortened))
 
-            \(excerpt.selectedText)
+            \(selectedText)
 
             """
-            if !excerpt.contextBefore.isEmpty || !excerpt.contextAfter.isEmpty {
-                output += "Context: ...\(excerpt.contextBefore) [excerpt] \(excerpt.selectedText) [/excerpt] \(excerpt.contextAfter)...\n\n"
+            if !contextBefore.isEmpty || !contextAfter.isEmpty {
+                output += "Context: ...\(contextBefore) [excerpt] \(contextSelection) [/excerpt] \(contextAfter)...\n\n"
             }
             output += "---\n\n"
         }
 
-        return output
+        return normalizedLineEndings(output)
     }
 
     func export(excerpt: ExcerptEntity, exportedAt: Date = .now) -> String {
@@ -59,7 +63,7 @@ struct ExcerptTextExporter {
                     key: key,
                     title: key.title,
                     author: key.author,
-                    excerpts: excerpts.sorted { $0.sortProgress < $1.sortProgress }
+                    excerpts: sortedExcerpts(excerpts)
                 )
             }
             .sorted { lhs, rhs in
@@ -95,6 +99,59 @@ struct ExcerptTextExporter {
         }
 
         return output
+    }
+
+    private func sortedExcerpts(_ excerpts: [ExcerptEntity]) -> [ExcerptEntity] {
+        excerpts.sorted { lhs, rhs in
+            let lhsProgress = sortableProgress(lhs.sortProgress)
+            let rhsProgress = sortableProgress(rhs.sortProgress)
+            if lhsProgress != rhsProgress {
+                return lhsProgress < rhsProgress
+            }
+            if lhs.createdAt != rhs.createdAt {
+                return lhs.createdAt < rhs.createdAt
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+    }
+
+    private func locationDescription(for excerpt: ExcerptEntity) -> String {
+        guard let progress = boundedProgress(excerpt.sortProgress) else {
+            return "Unknown"
+        }
+        return "\(Int(progress * 100))%"
+    }
+
+    private func sortableProgress(_ progress: Double) -> Double {
+        boundedProgress(progress) ?? .infinity
+    }
+
+    private func boundedProgress(_ progress: Double) -> Double? {
+        guard progress.isFinite else {
+            return nil
+        }
+        return min(1, max(0, progress))
+    }
+
+    private func normalizedBodyText(_ text: String) -> String {
+        let normalizedLines = normalizedLineEndings(text)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { normalizedInlineText(String($0)) }
+            .joined(separator: "\n")
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        return normalizedLines.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizedInlineText(_ text: String) -> String {
+        normalizedLineEndings(text)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizedLineEndings(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
     }
 
     private func sanitizedFilenameComponent(_ value: String, fallback: String) -> String {

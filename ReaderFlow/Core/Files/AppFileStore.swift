@@ -115,6 +115,28 @@ struct AppFileStore {
         return destination
     }
 
+    func removeExportFiles(olderThan cutoffDate: Date, fileManager: FileManager = .default) throws {
+        guard fileManager.fileExists(atPath: exportsURL.path) else {
+            return
+        }
+        let exportFiles = try fileManager.contentsOfDirectory(
+            at: exportsURL,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        for fileURL in exportFiles {
+            let values = try fileURL.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            guard values.isRegularFile == true else {
+                continue
+            }
+            let modifiedAt = values.contentModificationDate ?? .distantPast
+            if modifiedAt < cutoffDate {
+                try fileManager.removeItem(at: fileURL)
+            }
+        }
+    }
+
     private func isSafeExportFileName(_ fileName: String) -> Bool {
         let trimmed = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty

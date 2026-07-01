@@ -23,6 +23,82 @@ struct ExcerptTextExporterTests {
         #expect(text.contains("Context: ...before [excerpt] selected words [/excerpt] after..."))
     }
 
+    @Test func exportOrdersExcerptsByProgressThenSavedDate() throws {
+        let bookId = UUID()
+        let laterExcerptAtSameProgress = ExcerptEntity(
+            bookId: bookId,
+            bookTitleSnapshot: "Book",
+            authorDisplaySnapshot: "Author",
+            selectedText: "second at same progress",
+            createdAt: Date(timeIntervalSince1970: 300),
+            sortProgress: 0.4
+        )
+        let earlierProgressExcerpt = ExcerptEntity(
+            bookId: bookId,
+            bookTitleSnapshot: "Book",
+            authorDisplaySnapshot: "Author",
+            selectedText: "first by progress",
+            createdAt: Date(timeIntervalSince1970: 500),
+            sortProgress: 0.2
+        )
+        let earlierExcerptAtSameProgress = ExcerptEntity(
+            bookId: bookId,
+            bookTitleSnapshot: "Book",
+            authorDisplaySnapshot: "Author",
+            selectedText: "first at same progress",
+            createdAt: Date(timeIntervalSince1970: 100),
+            sortProgress: 0.4
+        )
+
+        let text = ExcerptTextExporter().export(
+            bookTitle: "Book",
+            author: "Author",
+            excerpts: [laterExcerptAtSameProgress, earlierProgressExcerpt, earlierExcerptAtSameProgress]
+        )
+
+        let firstByProgressIndex = try #require(text.range(of: "first by progress")?.lowerBound)
+        let firstAtSameProgressIndex = try #require(text.range(of: "first at same progress")?.lowerBound)
+        let secondAtSameProgressIndex = try #require(text.range(of: "second at same progress")?.lowerBound)
+        #expect(firstByProgressIndex < firstAtSameProgressIndex)
+        #expect(firstAtSameProgressIndex < secondAtSameProgressIndex)
+    }
+
+    @Test func exportNormalizesWhitespaceAndLineEndingsWithoutDroppingParagraphs() {
+        let excerpt = ExcerptEntity(
+            bookId: UUID(),
+            bookTitleSnapshot: "Book",
+            authorDisplaySnapshot: "Author",
+            chapterTitle: "Chapter 1",
+            selectedText: " first\tline\r\n\r\n second  paragraph\r\n\r\n\r\n third ",
+            contextBefore: " before\r\n words  ",
+            contextAfter: "\tafter\n words ",
+            sortProgress: 0.42
+        )
+
+        let text = ExcerptTextExporter().export(bookTitle: "Book", author: "Author", excerpts: [excerpt])
+
+        #expect(!text.contains("\r"))
+        #expect(text.contains("first line\n\nsecond paragraph\n\nthird"))
+        #expect(text.contains("Context: ...before words [excerpt] first line second paragraph third [/excerpt] after words..."))
+    }
+
+    @Test func exportKeepsUnicodeAndReportsUnknownLocationWhenProgressIsUnavailable() {
+        let excerpt = ExcerptEntity(
+            bookId: UUID(),
+            bookTitleSnapshot: "Book",
+            authorDisplaySnapshot: "Author",
+            chapterTitle: nil,
+            selectedText: "مرحبا\n世界",
+            sortProgress: .nan
+        )
+
+        let text = ExcerptTextExporter().export(bookTitle: "Book", author: "Author", excerpts: [excerpt])
+
+        #expect(text.contains("Chapter: Unknown"))
+        #expect(text.contains("Location: Unknown"))
+        #expect(text.contains("مرحبا\n世界"))
+    }
+
     @Test func exportsSingleExcerptAndPlainTextFilenames() {
         let excerpt = ExcerptEntity(
             bookId: UUID(),

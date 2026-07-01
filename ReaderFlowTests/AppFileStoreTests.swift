@@ -68,6 +68,34 @@ struct AppFileStoreTests {
         }
     }
 
+    @Test func removesOnlyStaleRegularExportFiles() throws {
+        let fileManager = FileManager.default
+        let rootURL = temporaryRootURL()
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+        let store = try AppFileStore(rootURL: rootURL, fileManager: fileManager)
+        let staleURL = try store.writeExportFile(named: "stale.txt", contents: "old", fileManager: fileManager)
+        let freshURL = try store.writeExportFile(named: "fresh.txt", contents: "new", fileManager: fileManager)
+        let nestedDirectoryURL = store.exportsURL.appending(path: "nested", directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: nestedDirectoryURL, withIntermediateDirectories: true)
+        let cutoffDate = Date(timeIntervalSince1970: 10000)
+        try fileManager.setAttributes(
+            [.modificationDate: cutoffDate.addingTimeInterval(-1)],
+            ofItemAtPath: staleURL.path
+        )
+        try fileManager.setAttributes(
+            [.modificationDate: cutoffDate.addingTimeInterval(1)],
+            ofItemAtPath: freshURL.path
+        )
+
+        try store.removeExportFiles(olderThan: cutoffDate, fileManager: fileManager)
+
+        #expect(!fileManager.fileExists(atPath: staleURL.path))
+        #expect(fileManager.fileExists(atPath: freshURL.path))
+        #expect(fileManager.fileExists(atPath: nestedDirectoryURL.path))
+    }
+
     private func temporaryRootURL() -> URL {
         FileManager.default.temporaryDirectory
             .appending(path: "ReaderFlowTests-\(UUID().uuidString)", directoryHint: .isDirectory)
