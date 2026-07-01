@@ -273,12 +273,14 @@ struct EPUBPackageParserTests {
             <dc:language>en</dc:language>
             <dc:identifier id="other-id">ignored</dc:identifier>
             <dc:identifier id="book-id">urn:uuid:test-book</dc:identifier>
+            <meta name="cover" content="cover-image"/>
             <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>
           </metadata>
           <manifest>
             <item id="chapter-1" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
             <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
             <item id="style" href="Styles/book.css" media-type="text/css"/>
+            <item id="cover-image" href="Images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
           </manifest>
           <spine>
             <itemref idref="chapter-1"/>
@@ -296,8 +298,10 @@ struct EPUBPackageParserTests {
         #expect(package.metadata.language == "en")
         #expect(package.metadata.identifier == "urn:uuid:test-book")
         #expect(package.metadata.modified == "2026-01-01T00:00:00Z")
-        #expect(package.manifest.count == 3)
+        #expect(package.metadata.coverItemID == "cover-image")
+        #expect(package.manifest.count == 4)
         #expect(package.manifestItem(id: "nav")?.properties == ["nav"])
+        #expect(package.manifestItem(id: "cover-image")?.properties == ["cover-image"])
         #expect(package.spine == [
             EPUBSpineItem(idref: "chapter-1", linear: true),
             EPUBSpineItem(idref: "nav", linear: false),

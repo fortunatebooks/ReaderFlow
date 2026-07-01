@@ -59,6 +59,7 @@ struct EPUBImportService {
                 authorDisplay: package.metadata.creators.first ?? "Unknown Author",
                 authors: package.metadata.creators.map { AuthorPayload(name: $0) },
                 languageCode: package.metadata.language,
+                coverFileName: coverFileName(in: package),
                 originalFileName: sourceURL.lastPathComponent,
                 epubFileName: "source.epub",
                 expandedDirectoryName: "expanded",
@@ -94,6 +95,34 @@ struct EPUBImportService {
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
+
+    private func coverFileName(in package: EPUBPackageDocument) -> String? {
+        guard let coverItem = coverManifestItem(in: package) else {
+            return nil
+        }
+        return package.resourceResolver.normalizedResourcePath(coverItem.href)
+    }
+
+    private func coverManifestItem(in package: EPUBPackageDocument) -> EPUBManifestItem? {
+        if let coverItemID = package.metadata.coverItemID,
+           let coverItem = package.manifestItem(id: coverItemID),
+           isImage(coverItem.mediaType)
+        {
+            return coverItem
+        }
+
+        if let coverItem = package.manifest.first(where: { $0.properties.contains("cover-image") && isImage($0.mediaType) }) {
+            return coverItem
+        }
+
+        return package.manifest.first { item in
+            isImage(item.mediaType) && item.id.localizedCaseInsensitiveContains("cover")
+        }
+    }
+
+    private func isImage(_ mediaType: String) -> Bool {
+        mediaType.lowercased().hasPrefix("image/")
+    }
 }
 
 struct ImportedEPUBDraft {
@@ -102,6 +131,7 @@ struct ImportedEPUBDraft {
     var authorDisplay: String
     var authors: [AuthorPayload]
     var languageCode: String?
+    var coverFileName: String?
     var originalFileName: String
     var epubFileName: String
     var expandedDirectoryName: String

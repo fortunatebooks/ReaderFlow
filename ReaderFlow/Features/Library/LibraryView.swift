@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct LibraryView: View {
     @Environment(\.modelContext) private var modelContext
@@ -158,6 +159,7 @@ struct LibraryView: View {
             originalFileName: draft.originalFileName,
             epubFileName: draft.epubFileName,
             expandedDirectoryName: draft.expandedDirectoryName,
+            coverFileName: draft.coverFileName,
             tableOfContentsJSON: draft.encodedTableOfContents(),
             fileSizeBytes: draft.fileSizeBytes,
             expandedSizeBytes: draft.preflight.expandedSizeBytes,
@@ -199,13 +201,7 @@ private struct BookRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(.tint.opacity(0.18))
-                .frame(width: 48, height: 68)
-                .overlay {
-                    Image(systemName: "book.closed")
-                        .foregroundStyle(.tint)
-                }
+            BookCoverThumbnail(book: book)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(book.title)
@@ -220,5 +216,68 @@ private struct BookRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct BookCoverThumbnail: View {
+    let book: BookEntity
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(.tint.opacity(0.18))
+
+            if let coverImage {
+                Image(uiImage: coverImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "book.closed")
+                    .foregroundStyle(.tint)
+            }
+        }
+        .frame(width: 48, height: 68)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var coverImage: UIImage? {
+        guard let coverURL else {
+            return nil
+        }
+        return UIImage(contentsOfFile: coverURL.path)
+    }
+
+    private var coverURL: URL? {
+        guard let coverFileName = book.coverFileName,
+              let store = try? AppFileStore()
+        else {
+            return nil
+        }
+
+        let rootURL = store.booksURL
+            .appending(path: book.id.uuidString, directoryHint: .isDirectory)
+            .appending(path: book.expandedDirectoryName ?? "expanded", directoryHint: .isDirectory)
+        return bookResourceURL(for: coverFileName, rootURL: rootURL)
+    }
+
+    private func bookResourceURL(for path: String, rootURL: URL) -> URL? {
+        let resourcePath = path
+            .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+            .map(String.init) ?? path
+        let root = rootURL.standardizedFileURL
+        let candidate = resourcePath
+            .split(separator: "/")
+            .reduce(root) { partialURL, component in
+                partialURL.appendingPathComponent(String(component).removingPercentEncoding ?? String(component))
+            }
+            .standardizedFileURL
+
+        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/"),
+              FileManager.default.fileExists(atPath: candidate.path)
+        else {
+            return nil
+        }
+        return candidate
     }
 }

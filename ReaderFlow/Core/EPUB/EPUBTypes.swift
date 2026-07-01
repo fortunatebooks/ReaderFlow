@@ -98,13 +98,15 @@ struct EPUBPackageMetadata: Hashable {
     var language: String?
     var identifier: String?
     var modified: String?
+    var coverItemID: String?
 
     static let empty = EPUBPackageMetadata(
         title: nil,
         creators: [],
         language: nil,
         identifier: nil,
-        modified: nil
+        modified: nil,
+        coverItemID: nil
     )
 }
 
@@ -340,8 +342,8 @@ private final class EPUBPackageXMLParserDelegate: NSObject, XMLParserDelegate {
         case "identifier" where isInsideMetadata:
             currentIdentifierID = attributeDict["id"]
             beginText(.identifier)
-        case "meta" where isInsideMetadata && attributeDict["property"] == "dcterms:modified":
-            beginText(.modified)
+        case "meta" where isInsideMetadata:
+            parseMetadataMeta(attributes: attributeDict)
         default:
             break
         }
@@ -408,6 +410,21 @@ private final class EPUBPackageXMLParserDelegate: NSObject, XMLParserDelegate {
                 linear: attributes["linear"]?.lowercased() != "no"
             )
         )
+    }
+
+    private func parseMetadataMeta(attributes: [String: String]) {
+        if attributes["property"] == "dcterms:modified" {
+            beginText(.modified)
+            return
+        }
+
+        guard attributes["name"]?.lowercased() == "cover",
+              let coverItemID = attributes["content"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !coverItemID.isEmpty
+        else {
+            return
+        }
+        metadata.coverItemID = coverItemID
     }
 
     private func beginText(_ target: TextTarget) {
