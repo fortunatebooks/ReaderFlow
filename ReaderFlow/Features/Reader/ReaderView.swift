@@ -56,7 +56,8 @@ struct ReaderView: View {
                 onSelection: saveSelection,
                 onReady: readerDidBecomeReady,
                 onTap: toggleReaderPlayback,
-                onSpeedAdjustment: adjustSpeed
+                onSpeedAdjustment: adjustSpeed,
+                onScrollStateChanged: readerScrollStateChanged
             )
             .ignoresSafeArea()
 
@@ -309,6 +310,31 @@ struct ReaderView: View {
         }
     }
 
+    private func readerScrollStateChanged(_ state: ReaderScrollStateMessage) {
+        if isScrolling != state.running {
+            isScrolling = state.running
+        }
+
+        if state.running {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showControls = false
+            }
+            return
+        }
+
+        withAnimation(.easeOut(duration: 0.2)) {
+            showControls = true
+        }
+        switch state.reason {
+        case "manualScroll":
+            showTransientReaderMessage("Paused")
+        case "end":
+            showTransientReaderMessage("End of book", duration: 1.8)
+        default:
+            break
+        }
+    }
+
     private func navigateToTableOfContentsEntry(_ entry: TableOfContentsEntry) {
         navigationRequest = ReaderNavigationRequest(id: UUID(), href: entry.href)
         showingTableOfContents = false
@@ -327,6 +353,15 @@ struct ReaderView: View {
         confirmationText = "Excerpt location"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             if confirmationText == "Excerpt location" {
+                confirmationText = nil
+            }
+        }
+    }
+
+    private func showTransientReaderMessage(_ message: String, duration: TimeInterval = 1.2) {
+        confirmationText = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            if confirmationText == message {
                 confirmationText = nil
             }
         }

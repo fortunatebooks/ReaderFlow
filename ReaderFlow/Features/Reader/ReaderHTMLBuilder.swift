@@ -89,6 +89,9 @@ enum ReaderWebAssets {
       let lastProgressPost = 0;
       let touchStart = null;
       let suppressClickUntil = 0;
+      let programmaticScrollUntil = 0;
+      let scrollProgressTimer = null;
+      const speedSwipeEdgeWidth = 84;
 
       const progress = () => {
         const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
@@ -102,6 +105,43 @@ enum ReaderWebAssets {
         };
       };
 
+      const markProgrammaticScroll = (duration = 700) => {
+        programmaticScrollUntil = Date.now() + duration;
+      };
+
+      const scheduleProgressPost = (delay = 120) => {
+        if (scrollProgressTimer) {
+          clearTimeout(scrollProgressTimer);
+        }
+        scrollProgressTimer = setTimeout(() => {
+          scrollProgressTimer = null;
+          post('progressChanged', progress());
+        }, delay);
+      };
+
+      const scrollToY = (target) => {
+        const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+        const viewportHeight = window.innerHeight || 1;
+        const maxScroll = Math.max(0, documentHeight - viewportHeight);
+        const boundedTarget = Math.max(0, Math.min(maxScroll, Number(target) || 0));
+        const root = document.documentElement;
+        const body = document.body;
+        const previousRootScrollBehavior = root.style.scrollBehavior;
+        const previousBodyScrollBehavior = body.style.scrollBehavior;
+        markProgrammaticScroll();
+        root.style.scrollBehavior = 'auto';
+        body.style.scrollBehavior = 'auto';
+        window.scrollTo({ top: boundedTarget, left: 0, behavior: 'instant' });
+        root.style.scrollBehavior = previousRootScrollBehavior;
+        body.style.scrollBehavior = previousBodyScrollBehavior;
+        post('progressChanged', progress());
+      };
+
+      const scrollToElement = (element) => {
+        const rect = element.getBoundingClientRect();
+        scrollToY(window.scrollY + rect.top);
+      };
+
       const tick = (time) => {
         if (!running) {
           lastTime = null;
@@ -112,6 +152,7 @@ enum ReaderWebAssets {
         }
         const delta = Math.max(0, (time - lastTime) / 1000);
         lastTime = time;
+        markProgrammaticScroll(120);
         window.scrollBy(0, speed * delta);
         if (time - lastProgressPost > 1000) {
           lastProgressPost = time;
@@ -120,11 +161,24 @@ enum ReaderWebAssets {
         const current = progress();
         if (current.totalProgression >= 1) {
           running = false;
-          post('scrollStateChanged', { running: false });
+          post('progressChanged', current);
+          post('scrollStateChanged', { running: false, reason: 'end' });
           return;
         }
         requestAnimationFrame(tick);
       };
+
+      const pauseForManualScroll = () => {
+        if (!running) {
+          return;
+        }
+        running = false;
+        lastTime = null;
+        scheduleProgressPost(140);
+        post('scrollStateChanged', { running: false, reason: 'manualScroll' });
+      };
+
+      const isRightEdgeTouch = (touch) => touch.clientX >= Math.max(0, window.innerWidth - speedSwipeEdgeWidth);
 
       const wordsBefore = (text, count = 10) => text
         .trim()
@@ -269,8 +323,32 @@ enum ReaderWebAssets {
           return;
         }
         const touch = event.touches[0];
-        touchStart = { x: touch.clientX, y: touch.clientY };
+        touchStart = {
+          x: touch.clientX,
+          y: touch.clientY,
+          speedEdge: isRightEdgeTouch(touch),
+          moved: false
+        };
       }, { passive: true });
+
+      document.addEventListener('touchmove', (event) => {
+        if (!touchStart || event.touches.length !== 1) {
+          return;
+        }
+        const touch = event.touches[0];
+        const dx = touch.clientX - touchStart.x;
+        const dy = touch.clientY - touchStart.y;
+        if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+          touchStart.moved = true;
+        }
+        if (touchStart.speedEdge && Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx) * 1.2) {
+          event.preventDefault();
+          return;
+        }
+        if (running && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+          pauseForManualScroll();
+        }
+      }, { passive: false });
 
       document.addEventListener('touchend', (event) => {
         if (!touchStart || event.changedTouches.length !== 1) {
@@ -286,7 +364,17 @@ enum ReaderWebAssets {
         const touch = event.changedTouches[0];
         const dx = touch.clientX - touchStart.x;
         const dy = touch.clientY - touchStart.y;
+        const wasSpeedEdge = touchStart.speedEdge;
+        const moved = touchStart.moved;
         touchStart = null;
+
+        if (moved) {
+          suppressClickUntil = Date.now() + 300;
+        }
+
+        if (!wasSpeedEdge) {
+          return;
+        }
 
         if (Math.abs(dy) < 52 || Math.abs(dy) < Math.abs(dx) * 1.5) {
           return;
@@ -296,6 +384,19 @@ enum ReaderWebAssets {
         suppressClickUntil = Date.now() + 450;
         post('speedAdjustment', { delta: dy < 0 ? 5 : -5 });
       }, { passive: false });
+
+      window.addEventListener('wheel', () => {
+        pauseForManualScroll();
+      }, { passive: true });
+
+      window.addEventListener('scroll', () => {
+        if (running && Date.now() > programmaticScrollUntil) {
+          pauseForManualScroll();
+        }
+        if (!running) {
+          scheduleProgressPost(120);
+        }
+      }, { passive: true });
 
       const chapterForHref = (value) => {
         const href = String(value || '').split('#')[0];
@@ -308,15 +409,10 @@ enum ReaderWebAssets {
 
       const scrollToChapterProgress = (chapter, value) => {
         const chapterProgress = Math.max(0, Math.min(1, Number(value) || 0));
-        const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
-        const viewportHeight = window.innerHeight || 1;
-        const maxScroll = Math.max(0, documentHeight - viewportHeight);
         const chapterRect = chapter.getBoundingClientRect();
         const chapterTop = window.scrollY + chapterRect.top;
         const chapterHeight = Math.max(1, chapter.scrollHeight || chapterRect.height || 1);
-        const target = Math.max(0, Math.min(maxScroll, chapterTop + chapterHeight * chapterProgress));
-        window.scrollTo(0, target);
-        post('progressChanged', progress());
+        scrollToY(chapterTop + chapterHeight * chapterProgress);
       };
 
       const finiteNumber = (value) => value !== null && value !== undefined && Number.isFinite(Number(value));
@@ -326,20 +422,18 @@ enum ReaderWebAssets {
           speed = Number(value) || 25;
         },
         scrollToProgress(value) {
+          const target = Math.max(0, Math.min(1, Number(value) || 0));
           const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
           const viewportHeight = window.innerHeight || 1;
           const maxScroll = Math.max(0, documentHeight - viewportHeight);
-          const target = Math.max(0, Math.min(1, Number(value) || 0));
-          window.scrollTo(0, maxScroll * target);
-          post('progressChanged', progress());
+          scrollToY(maxScroll * target);
         },
         scrollToHref(value) {
           const target = chapterForHref(value);
           if (!target) {
             return;
           }
-          target.scrollIntoView({ block: 'start' });
-          post('progressChanged', progress());
+          scrollToElement(target);
         },
         scrollToLocator(href, chapterProgression, fallbackProgress) {
           const target = chapterForHref(href);
@@ -348,8 +442,7 @@ enum ReaderWebAssets {
             return;
           }
           if (target) {
-            target.scrollIntoView({ block: 'start' });
-            post('progressChanged', progress());
+            scrollToElement(target);
             return;
           }
           if (finiteNumber(fallbackProgress)) {
@@ -364,6 +457,9 @@ enum ReaderWebAssets {
           }
         },
         pause() {
+          if (!running) {
+            return;
+          }
           running = false;
           post('progressChanged', progress());
           post('scrollStateChanged', { running: false });

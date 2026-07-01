@@ -13,6 +13,11 @@ struct ReaderSpeedAdjustmentMessage: Decodable, Hashable {
     var delta: Double
 }
 
+struct ReaderScrollStateMessage: Decodable, Hashable {
+    var running: Bool
+    var reason: String?
+}
+
 struct ReaderNavigationRequest: Hashable {
     var id: UUID
     var href: String?
@@ -41,6 +46,7 @@ struct ReaderWebView: UIViewRepresentable {
     var onReady: () -> Void
     var onTap: () -> Void
     var onSpeedAdjustment: (Double) -> Void
+    var onScrollStateChanged: (ReaderScrollStateMessage) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -54,7 +60,8 @@ struct ReaderWebView: UIViewRepresentable {
             onSelection: onSelection,
             onReady: onReady,
             onTap: onTap,
-            onSpeedAdjustment: onSpeedAdjustment
+            onSpeedAdjustment: onSpeedAdjustment,
+            onScrollStateChanged: onScrollStateChanged
         )
     }
 
@@ -82,6 +89,7 @@ struct ReaderWebView: UIViewRepresentable {
         context.coordinator.onReady = onReady
         context.coordinator.onTap = onTap
         context.coordinator.onSpeedAdjustment = onSpeedAdjustment
+        context.coordinator.onScrollStateChanged = onScrollStateChanged
         context.coordinator.currentInitialProgress = initialProgress
         context.coordinator.currentNavigationRequest = navigationRequest
         context.coordinator.currentSpeed = speed
@@ -115,6 +123,7 @@ struct ReaderWebView: UIViewRepresentable {
         var onReady: () -> Void
         var onTap: () -> Void
         var onSpeedAdjustment: (Double) -> Void
+        var onScrollStateChanged: (ReaderScrollStateMessage) -> Void
 
         init(
             expectedBridgeToken: String,
@@ -127,7 +136,8 @@ struct ReaderWebView: UIViewRepresentable {
             onSelection: @escaping (ReaderSelectionPayload) -> Void,
             onReady: @escaping () -> Void,
             onTap: @escaping () -> Void,
-            onSpeedAdjustment: @escaping (Double) -> Void
+            onSpeedAdjustment: @escaping (Double) -> Void,
+            onScrollStateChanged: @escaping (ReaderScrollStateMessage) -> Void
         ) {
             self.expectedBridgeToken = expectedBridgeToken
             self.currentHTML = currentHTML
@@ -140,6 +150,7 @@ struct ReaderWebView: UIViewRepresentable {
             self.onReady = onReady
             self.onTap = onTap
             self.onSpeedAdjustment = onSpeedAdjustment
+            self.onScrollStateChanged = onScrollStateChanged
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -164,6 +175,8 @@ struct ReaderWebView: UIViewRepresentable {
                 onTap()
             case "speedAdjustment":
                 decode(ReaderSpeedAdjustmentMessage.self, from: body["payload"]).map { onSpeedAdjustment($0.delta) }
+            case "scrollStateChanged":
+                decode(ReaderScrollStateMessage.self, from: body["payload"]).map(onScrollStateChanged)
             default:
                 break
             }
