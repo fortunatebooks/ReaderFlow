@@ -257,23 +257,7 @@ private struct BookCoverThumbnail: View {
         let rootURL = store.booksURL
             .appending(path: book.id.uuidString, directoryHint: .isDirectory)
             .appending(path: book.expandedDirectoryName ?? "expanded", directoryHint: .isDirectory)
-        return bookResourceURL(for: coverFileName, rootURL: rootURL)
-    }
-
-    private func bookResourceURL(for path: String, rootURL: URL) -> URL? {
-        let resourcePath = path
-            .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
-            .first
-            .map(String.init) ?? path
-        let root = rootURL.standardizedFileURL
-        let candidate = resourcePath
-            .split(separator: "/")
-            .reduce(root) { partialURL, component in
-                partialURL.appendingPathComponent(String(component).removingPercentEncoding ?? String(component))
-            }
-            .standardizedFileURL
-
-        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/"),
+        guard let candidate = EPUBResourceResolver.fileURL(forNormalizedResourcePath: coverFileName, rootURL: rootURL),
               FileManager.default.fileExists(atPath: candidate.path)
         else {
             return nil

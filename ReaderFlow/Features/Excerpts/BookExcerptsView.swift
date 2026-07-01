@@ -53,10 +53,10 @@ struct BookExcerptsView: View {
 struct ArchivedExcerptsView: View {
     @Query(sort: \ExcerptEntity.createdAt, order: .reverse) private var excerpts: [ExcerptEntity]
 
-    private var archivedGroups: [(title: String, excerpts: [ExcerptEntity])] {
-        Dictionary(grouping: excerpts.filter { !$0.sourceBookAvailable }, by: \.bookTitleSnapshot)
+    private var archivedGroups: [(key: ExcerptBookGroupKey, excerpts: [ExcerptEntity])] {
+        Dictionary(grouping: excerpts.filter { !$0.sourceBookAvailable }, by: ExcerptBookGroupKey.init)
             .map { ($0.key, $0.value.sorted { $0.sortProgress < $1.sortProgress }) }
-            .sorted { $0.title < $1.title }
+            .sorted(by: sortBookGroups)
     }
 
     var body: some View {
@@ -64,14 +64,14 @@ struct ArchivedExcerptsView: View {
             if archivedGroups.isEmpty {
                 ContentUnavailableView("No Archived Excerpts", systemImage: "archivebox", description: Text("Excerpts from deleted local books remain available here."))
             } else {
-                ForEach(archivedGroups, id: \.title) { group in
+                ForEach(archivedGroups, id: \.key) { group in
                     NavigationLink {
-                        ArchivedBookExcerptsView(title: group.title, excerpts: group.excerpts)
+                        ArchivedBookExcerptsView(title: group.key.title, excerpts: group.excerpts)
                     } label: {
                         VStack(alignment: .leading) {
-                            Text(group.title)
+                            Text(group.key.title)
                                 .font(.headline)
-                            Text("\(group.excerpts.count) excerpts")
+                            Text("\(group.key.author) · \(group.excerpts.count) excerpts")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
@@ -86,12 +86,10 @@ struct ArchivedExcerptsView: View {
 struct AllExcerptsView: View {
     @Query(sort: \ExcerptEntity.createdAt, order: .reverse) private var excerpts: [ExcerptEntity]
 
-    private var excerptGroups: [(title: String, excerpts: [ExcerptEntity])] {
-        Dictionary(grouping: excerpts, by: \.bookTitleSnapshot)
-            .map { title, excerpts in
-                (title, excerpts.sorted { $0.sortProgress < $1.sortProgress })
-            }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    private var excerptGroups: [(key: ExcerptBookGroupKey, excerpts: [ExcerptEntity])] {
+        Dictionary(grouping: excerpts, by: ExcerptBookGroupKey.init)
+            .map { ($0.key, $0.value.sorted { $0.sortProgress < $1.sortProgress }) }
+            .sorted(by: sortBookGroups)
     }
 
     var body: some View {
@@ -99,10 +97,17 @@ struct AllExcerptsView: View {
             if excerptGroups.isEmpty {
                 ContentUnavailableView("No Excerpts", systemImage: "text.quote", description: Text("Saved passages from your books will appear here."))
             } else {
-                ForEach(excerptGroups, id: \.title) { group in
-                    Section(group.title) {
+                ForEach(excerptGroups, id: \.key) { group in
+                    Section {
                         ForEach(group.excerpts) { excerpt in
                             ExcerptRow(excerpt: excerpt)
+                        }
+                    } header: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.key.title)
+                            Text(group.key.author)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -118,6 +123,33 @@ struct AllExcerptsView: View {
             }
         }
     }
+}
+
+private struct ExcerptBookGroupKey: Hashable {
+    var bookId: UUID
+    var title: String
+    var author: String
+
+    init(_ excerpt: ExcerptEntity) {
+        bookId = excerpt.bookId
+        title = excerpt.bookTitleSnapshot
+        author = excerpt.authorDisplaySnapshot
+    }
+}
+
+private func sortBookGroups(
+    _ lhs: (key: ExcerptBookGroupKey, excerpts: [ExcerptEntity]),
+    _ rhs: (key: ExcerptBookGroupKey, excerpts: [ExcerptEntity])
+) -> Bool {
+    let titleComparison = lhs.key.title.localizedStandardCompare(rhs.key.title)
+    if titleComparison != .orderedSame {
+        return titleComparison == .orderedAscending
+    }
+    let authorComparison = lhs.key.author.localizedStandardCompare(rhs.key.author)
+    if authorComparison != .orderedSame {
+        return authorComparison == .orderedAscending
+    }
+    return lhs.key.bookId.uuidString < rhs.key.bookId.uuidString
 }
 
 private struct ArchivedBookExcerptsView: View {

@@ -41,7 +41,7 @@ struct EPUBResourceResolver {
         let rootDepth = rootParts.count
 
         for part in pathParts(encodedPath) {
-            guard let decodedPart = part.removingPercentEncoding else {
+            guard let decodedPart = decodedSafePathSegment(part) else {
                 return nil
             }
             switch decodedPart {
@@ -66,6 +66,35 @@ struct EPUBResourceResolver {
             return nil
         }
         return readerURL(forNormalizedResourcePath: path, bookId: bookId)
+    }
+
+    static func fileURL(forNormalizedResourcePath normalizedPath: String, rootURL: URL) -> URL? {
+        let resourcePath = normalizedPath
+            .split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+            .map(String.init) ?? normalizedPath
+        let root = rootURL.standardizedFileURL
+        let components = resourcePath.split(separator: "/").map(String.init)
+        guard !components.isEmpty else {
+            return nil
+        }
+        var candidate = root
+
+        for component in components {
+            guard let decodedComponent = decodedSafePathSegment(component),
+                  decodedComponent != ".",
+                  decodedComponent != ".."
+            else {
+                return nil
+            }
+            candidate.appendPathComponent(decodedComponent)
+        }
+        candidate = candidate.standardizedFileURL
+
+        guard candidate.path == root.path || candidate.path.hasPrefix(root.path + "/") else {
+            return nil
+        }
+        return candidate
     }
 
     func readerURL(forNormalizedResourcePath normalizedPath: String, bookId: UUID) -> URL? {
@@ -101,7 +130,7 @@ struct EPUBResourceResolver {
 
         var parts: [String] = []
         for part in pathParts(components.percentEncodedPath) {
-            guard let decodedPart = part.removingPercentEncoding else {
+            guard let decodedPart = decodedSafePathSegment(part) else {
                 return nil
             }
             switch decodedPart {
@@ -125,5 +154,21 @@ struct EPUBResourceResolver {
             return normalizedPath
         }
         return normalizedPath + "#" + fragment
+    }
+
+    private static func decodedSafePathSegment(_ encodedPart: String) -> String? {
+        guard let decodedPart = encodedPart.removingPercentEncoding,
+              !decodedPart.isEmpty,
+              !decodedPart.contains("/"),
+              !decodedPart.contains("\\"),
+              !decodedPart.contains("\0")
+        else {
+            return nil
+        }
+        return decodedPart
+    }
+
+    private func decodedSafePathSegment(_ encodedPart: String) -> String? {
+        Self.decodedSafePathSegment(encodedPart)
     }
 }

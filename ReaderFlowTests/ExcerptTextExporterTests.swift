@@ -40,14 +40,25 @@ struct ExcerptTextExporterTests {
             selectedText: "a words",
             sortProgress: 0.1
         )
+        let sameTitleDifferentBookExcerpt = ExcerptEntity(
+            bookId: UUID(),
+            bookTitleSnapshot: "A Book",
+            authorDisplaySnapshot: "Author B",
+            chapterTitle: "Chapter B",
+            selectedText: "b words",
+            sortProgress: 0.3
+        )
 
-        let text = ExcerptTextExporter().exportLibrary(excerpts: [laterBookExcerpt, earlierBookExcerpt])
+        let text = ExcerptTextExporter().exportLibrary(excerpts: [laterBookExcerpt, earlierBookExcerpt, sameTitleDifferentBookExcerpt])
 
         #expect(text.contains("ReaderFlow Library Excerpts"))
-        #expect(text.contains("Book Count: 2"))
-        #expect(text.contains("Excerpt Count: 2"))
+        #expect(text.contains("Book Count: 3"))
+        #expect(text.contains("Excerpt Count: 3"))
         let aBookIndex = try #require(text.range(of: "Book: A Book")?.lowerBound)
+        let authorBIndex = try #require(text.range(of: "Author: Author B")?.lowerBound)
         let zBookIndex = try #require(text.range(of: "Book: Z Book")?.lowerBound)
         #expect(aBookIndex < zBookIndex)
+        #expect(authorBIndex < zBookIndex)
+        #expect(text.components(separatedBy: "Book: A Book").count - 1 == 2)
     }
 }

@@ -121,7 +121,8 @@ struct EPUBImportService {
     }
 
     private func isImage(_ mediaType: String) -> Bool {
-        mediaType.lowercased().hasPrefix("image/")
+        let lowercased = mediaType.lowercased()
+        return lowercased.hasPrefix("image/") && lowercased != "image/svg+xml"
     }
 }
 

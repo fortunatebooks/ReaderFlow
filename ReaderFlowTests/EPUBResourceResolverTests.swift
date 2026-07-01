@@ -17,6 +17,15 @@ struct EPUBResourceResolverTests {
         #expect(resolver.normalizedResourcePath("../../secret.txt", relativeTo: "chapter1.xhtml") == nil)
         #expect(resolver.normalizedResourcePath("../secret.txt", relativeTo: "chapter1.xhtml") == nil)
         #expect(resolver.normalizedResourcePath("%2e%2e/secret.txt", relativeTo: "chapter1.xhtml") == nil)
+        #expect(resolver.normalizedResourcePath("Text%2F..%2F..%2FMETA-INF/container.xml", relativeTo: "chapter1.xhtml") == nil)
+        #expect(resolver.normalizedResourcePath("Text%5C..%5Csecret.xhtml", relativeTo: "chapter1.xhtml") == nil)
+        #expect(resolver.normalizedResourcePath("images/cover.jpg", relativeTo: "Text%2F..%2Fsecret.xhtml") == nil)
+        #expect(
+            EPUBResourceResolver.fileURL(
+                forNormalizedResourcePath: "OPS/Text%2F..%2F..%2FMETA-INF/container.xml",
+                rootURL: URL(fileURLWithPath: "/tmp/ReaderFlowExpanded")
+            ) == nil
+        )
     }
 
     @Test func resolvesNestedBasePathsInsidePackageRoot() throws {
@@ -187,9 +196,9 @@ struct EPUBContentLoaderTests {
         #expect(chapters[0].bodyHTML.contains("src=\"readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover%20art.jpg\""))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover-small.jpg 1x"))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover%20large.jpg 2x"))
-        #expect(chapters[0].bodyHTML.contains("href=\"#next\""))
+        #expect(!chapters[0].bodyHTML.contains("href=\"#next\""))
         #expect(chapters[0].bodyHTML.contains("href=\"#rf-spine-1\""))
-        #expect(chapters[0].bodyHTML.contains("href=\"#local-note\""))
+        #expect(chapters[0].bodyHTML.contains("href=\"#rf-spine-0\""))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/bg.jpg"))
         #expect(!chapters[0].bodyHTML.localizedCaseInsensitiveContains("<script"))
         #expect(!chapters[0].bodyHTML.contains("https://example.com"))
