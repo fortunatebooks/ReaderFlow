@@ -97,11 +97,52 @@ enum ReaderWebAssets {
         const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
         const viewportHeight = window.innerHeight || 1;
         const maxScroll = Math.max(1, documentHeight - viewportHeight);
+        const chapter = chapterAtScrollPosition();
+        const chapterInfo = chapterProgressForScroll(chapter);
         return {
           scrollY: window.scrollY,
           documentHeight,
           viewportHeight,
-          totalProgression: Math.max(0, Math.min(1, window.scrollY / maxScroll))
+          totalProgression: Math.max(0, Math.min(1, window.scrollY / maxScroll)),
+          spineIndex: chapterInfo.spineIndex,
+          href: chapterInfo.href,
+          chapterTitle: chapterInfo.chapterTitle,
+          chapterProgression: chapterInfo.chapterProgression
+        };
+      };
+
+      const chapterAtScrollPosition = () => {
+        const chapters = Array.from(document.querySelectorAll('.rf-chapter'));
+        if (chapters.length === 0) {
+          return null;
+        }
+        const viewportAnchor = window.scrollY + Math.max(1, window.innerHeight || 1) * 0.22;
+        let current = chapters[0];
+        for (const chapter of chapters) {
+          const rect = chapter.getBoundingClientRect();
+          const top = window.scrollY + rect.top;
+          if (top <= viewportAnchor) {
+            current = chapter;
+          } else {
+            break;
+          }
+        }
+        return current;
+      };
+
+      const chapterProgressForScroll = (chapter) => {
+        if (!chapter || !chapter.dataset) {
+          return { spineIndex: 0, href: '', chapterTitle: null, chapterProgression: 0 };
+        }
+        const rect = chapter.getBoundingClientRect();
+        const top = window.scrollY + rect.top;
+        const height = Math.max(1, chapter.scrollHeight || rect.height || 1);
+        const viewportAnchor = window.scrollY + Math.max(1, window.innerHeight || 1) * 0.22;
+        return {
+          spineIndex: Number(chapter.dataset.spineIndex || 0) || 0,
+          href: chapter.dataset.href || '',
+          chapterTitle: chapter.dataset.title || null,
+          chapterProgression: Math.max(0, Math.min(1, (viewportAnchor - top) / height))
         };
       };
 
@@ -412,7 +453,8 @@ enum ReaderWebAssets {
         const chapterRect = chapter.getBoundingClientRect();
         const chapterTop = window.scrollY + chapterRect.top;
         const chapterHeight = Math.max(1, chapter.scrollHeight || chapterRect.height || 1);
-        scrollToY(chapterTop + chapterHeight * chapterProgress);
+        const viewportAnchorOffset = Math.max(1, window.innerHeight || 1) * 0.22;
+        scrollToY(chapterTop + chapterHeight * chapterProgress - viewportAnchorOffset);
       };
 
       const finiteNumber = (value) => value !== null && value !== undefined && Number.isFinite(Number(value));
@@ -435,7 +477,15 @@ enum ReaderWebAssets {
           }
           scrollToElement(target);
         },
-        scrollToLocator(href, chapterProgression, fallbackProgress) {
+        scrollToLocator(href, chapterProgression, fallbackProgress, scrollY, storedDocumentHeight) {
+          const currentDocumentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+          if (finiteNumber(scrollY) && finiteNumber(storedDocumentHeight)) {
+            const heightDelta = Math.abs(currentDocumentHeight - Number(storedDocumentHeight));
+            if (heightDelta / Math.max(1, Number(storedDocumentHeight)) <= 0.1) {
+              scrollToY(scrollY);
+              return;
+            }
+          }
           const target = chapterForHref(href);
           if (target && finiteNumber(chapterProgression)) {
             scrollToChapterProgress(target, chapterProgression);

@@ -39,18 +39,30 @@ struct ReaderInitialPosition: Hashable {
     var progress: Double
     var href: String?
     var chapterProgression: Double?
+    var scrollY: Double?
+    var documentHeight: Double?
 
-    init(progress: Double, href: String? = nil, chapterProgression: Double? = nil) {
+    init(
+        progress: Double,
+        href: String? = nil,
+        chapterProgression: Double? = nil,
+        scrollY: Double? = nil,
+        documentHeight: Double? = nil
+    ) {
         self.progress = ReaderInitialPosition.bounded(progress)
         self.href = href
         self.chapterProgression = chapterProgression.map(ReaderInitialPosition.bounded)
+        self.scrollY = scrollY.map { max(0, $0) }
+        self.documentHeight = documentHeight.map { max(1, $0) }
     }
 
     init(locator: ReaderLocator) {
         self.init(
             progress: locator.totalProgression,
             href: locator.href.isEmpty ? nil : locator.href,
-            chapterProgression: locator.chapterProgression
+            chapterProgression: locator.chapterProgression,
+            scrollY: locator.scrollY,
+            documentHeight: locator.documentHeight
         )
     }
 

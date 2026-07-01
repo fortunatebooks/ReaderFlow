@@ -7,6 +7,10 @@ struct ReaderProgressMessage: Decodable, Hashable {
     var documentHeight: Double
     var viewportHeight: Double
     var totalProgression: Double
+    var spineIndex: Int?
+    var href: String?
+    var chapterTitle: String?
+    var chapterProgression: Double?
 }
 
 struct ReaderSpeedAdjustmentMessage: Decodable, Hashable {
@@ -23,12 +27,23 @@ struct ReaderNavigationRequest: Hashable {
     var href: String?
     var chapterProgression: Double?
     var fallbackProgress: Double?
+    var scrollY: Double?
+    var documentHeight: Double?
 
-    init(id: UUID, href: String?, chapterProgression: Double? = nil, fallbackProgress: Double? = nil) {
+    init(
+        id: UUID,
+        href: String?,
+        chapterProgression: Double? = nil,
+        fallbackProgress: Double? = nil,
+        scrollY: Double? = nil,
+        documentHeight: Double? = nil
+    ) {
         self.id = id
         self.href = href
         self.chapterProgression = chapterProgression
         self.fallbackProgress = fallbackProgress
+        self.scrollY = scrollY
+        self.documentHeight = documentHeight
     }
 }
 
@@ -166,7 +181,6 @@ struct ReaderWebView: UIViewRepresentable {
             switch type {
             case "readerReady":
                 onReady()
-                decode(ReaderProgressMessage.self, from: body["payload"]).map(onProgress)
             case "progressChanged":
                 decode(ReaderProgressMessage.self, from: body["payload"]).map(onProgress)
             case "selectionSaved":
@@ -201,7 +215,6 @@ struct ReaderWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isDocumentReady = true
-            appliedNavigationRequestID = nil
             applyReaderState(to: webView)
             applyNavigationIfNeeded(to: webView)
         }
@@ -214,10 +227,12 @@ struct ReaderWebView: UIViewRepresentable {
             }
             appliedNavigationRequestID = request.id
             let hrefLiteral = javaScriptStringLiteral(request.href ?? "")
-            let chapterProgression = javaScriptNumberLiteral(request.chapterProgression)
-            let fallbackProgress = javaScriptNumberLiteral(request.fallbackProgress)
+            let chapterProgression = boundedJavaScriptNumberLiteral(request.chapterProgression)
+            let fallbackProgress = boundedJavaScriptNumberLiteral(request.fallbackProgress)
+            let scrollY = nonNegativeJavaScriptNumberLiteral(request.scrollY)
+            let documentHeight = nonNegativeJavaScriptNumberLiteral(request.documentHeight)
             webView.evaluateJavaScript(
-                "window.ReaderFlow && window.ReaderFlow.scrollToLocator(\(hrefLiteral), \(chapterProgression), \(fallbackProgress));"
+                "window.ReaderFlow && window.ReaderFlow.scrollToLocator(\(hrefLiteral), \(chapterProgression), \(fallbackProgress), \(scrollY), \(documentHeight));"
             )
         }
 
@@ -251,11 +266,20 @@ struct ReaderWebView: UIViewRepresentable {
             return encoded
         }
 
-        private func javaScriptNumberLiteral(_ value: Double?) -> String {
+        private func boundedJavaScriptNumberLiteral(_ value: Double?) -> String {
             guard let value else {
                 return "null"
             }
             return String(min(1, max(0, value)))
+        }
+
+        private func nonNegativeJavaScriptNumberLiteral(_ value: Double?) -> String {
+            guard let value,
+                  value.isFinite
+            else {
+                return "null"
+            }
+            return String(max(0, value))
         }
 
         private func decode<T: Decodable>(_ type: T.Type, from object: Any?) -> T? {

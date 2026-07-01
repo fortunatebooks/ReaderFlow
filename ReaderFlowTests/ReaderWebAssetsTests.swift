@@ -70,6 +70,33 @@ struct ReaderWebAssetsTests {
         #expect(try harness.string("document.body.style.scrollBehavior") == "")
     }
 
+    @Test func progressMessagesIncludeCurrentChapterLocatorFields() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate("messages = []; window.ReaderFlow.scrollToProgress(0.4);")
+
+        #expect(try harness.int("messages.filter(function(message) { return message.type === 'progressChanged' && message.payload.href === 'Text/chapter1.xhtml'; }).length") == 1)
+        #expect(try harness.int("messages.filter(function(message) { return message.type === 'progressChanged' && message.payload.spineIndex === 0; }).length") == 1)
+        #expect(try harness.string("messages[messages.length - 1].payload.chapterTitle") == "Chapter 1")
+        #expect(try abs(harness.double("messages[messages.length - 1].payload.chapterProgression") - 0.71) < 0.0001)
+    }
+
+    @Test func scrollToLocatorPrefersExactScrollWhenDocumentHeightMatches() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate("window.ReaderFlow.scrollToLocator('Text/chapter2.xhtml', 0.5, 0.1, 700, 2000);")
+
+        #expect(try harness.int("window.scrollY") == 700)
+    }
+
+    @Test func scrollToLocatorFallsBackToChapterWhenDocumentHeightChanged() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate("window.ReaderFlow.scrollToLocator('Text/chapter2.xhtml', 0.5, 0.1, 700, 1000);")
+
+        #expect(try harness.int("window.scrollY") == 1390)
+    }
+
     @Test func manualScrollWhileRunningPausesAndDebouncesProgress() throws {
         let harness = try ReaderScriptHarness()
 
@@ -99,6 +126,16 @@ struct ReaderWebAssetsTests {
 
         #expect(!message.running)
         #expect(message.reason == "manualScroll")
+    }
+
+    @Test func decodesReaderProgressChapterLocatorFields() throws {
+        let json = #"{"scrollY":600,"documentHeight":2000,"viewportHeight":500,"totalProgression":0.4,"spineIndex":0,"href":"Text/chapter1.xhtml","chapterTitle":"Chapter 1","chapterProgression":0.71}"#
+        let message = try JSONDecoder().decode(ReaderProgressMessage.self, from: Data(json.utf8))
+
+        #expect(message.spineIndex == 0)
+        #expect(message.href == "Text/chapter1.xhtml")
+        #expect(message.chapterTitle == "Chapter 1")
+        #expect(abs((message.chapterProgression ?? 0) - 0.71) < 0.0001)
     }
 
     private var normalizedScript: String {
@@ -157,6 +194,10 @@ private final class ReaderScriptHarness {
         try evaluate(script).toString()
     }
 
+    func double(_ script: String) throws -> Double {
+        try evaluate(script).toDouble()
+    }
+
     private static let stubScript = """
     var messages = [];
     var listeners = { document: {}, window: {} };
@@ -188,6 +229,20 @@ private final class ReaderScriptHarness {
         listeners.window[type](event || {});
       }
     }
+    var chapters = [
+      {
+        dataset: { spineIndex: '0', href: 'Text/chapter1.xhtml', normalizedHref: 'OPS/Text/chapter1.xhtml', title: 'Chapter 1' },
+        scrollHeight: 1000,
+        getBoundingClientRect: function() { return { top: 0 - window.scrollY, height: 1000 }; },
+        closest: function(selector) { return selector === '.rf-chapter' ? this : null; }
+      },
+      {
+        dataset: { spineIndex: '1', href: 'Text/chapter2.xhtml', normalizedHref: 'OPS/Text/chapter2.xhtml', title: 'Chapter 2' },
+        scrollHeight: 1000,
+        getBoundingClientRect: function() { return { top: 1000 - window.scrollY, height: 1000 }; },
+        closest: function(selector) { return selector === '.rf-chapter' ? this : null; }
+      }
+    ];
     var window = {
       __readerFlowBridgeToken: 'test-token',
       __readerFlowBookId: '00000000-0000-0000-0000-000000000000',
@@ -241,8 +296,12 @@ private final class ReaderScriptHarness {
       addEventListener: function(type, handler) {
         listeners.document[type] = handler;
       },
-      querySelectorAll: function() { return []; },
-      querySelector: function() { return null; },
+      querySelectorAll: function(selector) {
+        return selector === '.rf-chapter' ? chapters : [];
+      },
+      querySelector: function(selector) {
+        return selector === '.rf-chapter' ? chapters[0] : null;
+      },
       createElement: function() { return {}; },
       createRange: function() {
         return {

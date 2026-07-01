@@ -8,18 +8,16 @@ struct ReaderView: View {
     let book: BookEntity
     let initialPosition: ReaderInitialPosition?
     let initialNavigationRequest: ReaderNavigationRequest?
+    let initialProgressValue: Double
 
     init(book: BookEntity, initialPosition: ReaderInitialPosition? = nil) {
         self.book = book
         self.initialPosition = initialPosition
-        initialNavigationRequest = initialPosition.map {
-            ReaderNavigationRequest(
-                id: UUID(),
-                href: $0.href,
-                chapterProgression: $0.chapterProgression,
-                fallbackProgress: $0.progress
-            )
+        let restorePosition = initialPosition ?? book.readerInitialPosition
+        initialNavigationRequest = restorePosition.map {
+            ReaderNavigationRequest(id: UUID(), position: $0)
         }
+        initialProgressValue = restorePosition?.progress ?? book.readingProgress
     }
 
     @State private var isScrolling = false
@@ -48,8 +46,8 @@ struct ReaderView: View {
                 expectedBridgeToken: bridgeToken,
                 expectedBookId: book.id,
                 bookResourceRootURL: bookResourceRootURL,
-                initialProgress: initialPosition?.progress ?? book.readingProgress,
-                navigationRequest: navigationRequest ?? initialNavigationRequest,
+                initialProgress: effectiveInitialProgress,
+                navigationRequest: readerHTML == nil ? nil : effectiveNavigationRequest,
                 speed: $speed,
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
@@ -189,6 +187,18 @@ struct ReaderView: View {
         expandedRootURL(bookId: book.id, expandedDirectoryName: book.expandedDirectoryName)
     }
 
+    private var effectiveInitialProgress: Double {
+        guard initialPosition == nil else {
+            return initialProgressValue
+        }
+        return book.readerInitialPosition?.progress ?? book.readingProgress
+    }
+
+    private var effectiveNavigationRequest: ReaderNavigationRequest? {
+        navigationRequest
+            ?? initialNavigationRequest
+    }
+
     private var tableOfContentsEntries: [TableOfContentsEntry] {
         guard let data = book.tableOfContentsJSON,
               let payload = try? JSONDecoder().decode(TableOfContentsPayload.self, from: data)
@@ -265,7 +275,9 @@ struct ReaderView: View {
     }
 
     private func saveProgress(_ progress: ReaderProgressMessage) {
+        guard readerHTML != nil else { return }
         book.readingProgress = progress.totalProgression
+        book.lastLocatorJSON = progress.encodedLocator(bookId: book.id, bookFingerprint: book.contentFingerprint)
         book.lastOpenedAt = .now
         book.lastOpenedSortKey = .now
         try? modelContext.save()
@@ -346,9 +358,7 @@ struct ReaderView: View {
         showControls = true
         navigationRequest = ReaderNavigationRequest(
             id: UUID(),
-            href: position.href,
-            chapterProgression: position.chapterProgression,
-            fallbackProgress: position.progress
+            position: position
         )
         confirmationText = "Excerpt location"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
@@ -462,5 +472,44 @@ private enum ReaderDocumentLoadError: LocalizedError {
         case .emptyReadingOrder:
             "ReaderFlow could not find readable chapters in this EPUB."
         }
+    }
+}
+
+private extension ReaderNavigationRequest {
+    init(id: UUID, position: ReaderInitialPosition) {
+        self.init(
+            id: id,
+            href: position.href,
+            chapterProgression: position.chapterProgression,
+            fallbackProgress: position.progress,
+            scrollY: position.scrollY,
+            documentHeight: position.documentHeight
+        )
+    }
+}
+
+private extension ReaderProgressMessage {
+    func encodedLocator(bookId: UUID, bookFingerprint: String) -> Data? {
+        let locator = ReaderLocator(
+            bookId: bookId,
+            bookFingerprint: bookFingerprint,
+            spineIndex: max(0, spineIndex ?? 0),
+            href: href ?? "",
+            chapterTitle: chapterTitle,
+            chapterProgression: bounded(chapterProgression ?? totalProgression),
+            totalProgression: bounded(totalProgression),
+            scrollY: max(0, scrollY),
+            documentHeight: max(1, documentHeight),
+            textQuote: nil,
+            domTextPath: nil,
+            contentHash: nil,
+            readiumLocatorJSON: nil,
+            createdAt: .now
+        )
+        return try? JSONEncoder().encode(locator)
+    }
+
+    private func bounded(_ value: Double) -> Double {
+        min(1, max(0, value))
     }
 }
