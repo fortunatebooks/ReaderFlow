@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import WebKit
 
@@ -12,12 +13,18 @@ struct ReaderSpeedAdjustmentMessage: Decodable, Hashable {
     var delta: Double
 }
 
+struct ReaderNavigationRequest: Hashable {
+    var id: UUID
+    var href: String
+}
+
 struct ReaderWebView: UIViewRepresentable {
     let html: String
     let expectedBridgeToken: String
     let expectedBookId: UUID
     let bookResourceRootURL: URL?
     let initialProgress: Double
+    let navigationRequest: ReaderNavigationRequest?
     @Binding var speed: Double
     @Binding var isScrolling: Bool
     var onProgress: (ReaderProgressMessage) -> Void
@@ -31,6 +38,7 @@ struct ReaderWebView: UIViewRepresentable {
             expectedBridgeToken: expectedBridgeToken,
             currentHTML: html,
             currentInitialProgress: initialProgress,
+            currentNavigationRequest: navigationRequest,
             currentSpeed: speed,
             currentIsScrolling: isScrolling,
             onProgress: onProgress,
@@ -66,6 +74,7 @@ struct ReaderWebView: UIViewRepresentable {
         context.coordinator.onTap = onTap
         context.coordinator.onSpeedAdjustment = onSpeedAdjustment
         context.coordinator.currentInitialProgress = initialProgress
+        context.coordinator.currentNavigationRequest = navigationRequest
         context.coordinator.currentSpeed = speed
         context.coordinator.currentIsScrolling = isScrolling
         if context.coordinator.currentHTML != html {
@@ -77,6 +86,7 @@ struct ReaderWebView: UIViewRepresentable {
         }
 
         if context.coordinator.isDocumentReady {
+            context.coordinator.applyNavigationIfNeeded(to: webView)
             context.coordinator.applyReaderState(to: webView)
         }
     }
@@ -85,6 +95,8 @@ struct ReaderWebView: UIViewRepresentable {
         let expectedBridgeToken: String
         var currentHTML: String
         var currentInitialProgress: Double
+        var currentNavigationRequest: ReaderNavigationRequest?
+        var appliedNavigationRequestID: UUID?
         var currentSpeed: Double
         var currentIsScrolling: Bool
         var isDocumentReady = false
@@ -99,6 +111,7 @@ struct ReaderWebView: UIViewRepresentable {
             expectedBridgeToken: String,
             currentHTML: String,
             currentInitialProgress: Double,
+            currentNavigationRequest: ReaderNavigationRequest?,
             currentSpeed: Double,
             currentIsScrolling: Bool,
             onProgress: @escaping (ReaderProgressMessage) -> Void,
@@ -110,6 +123,7 @@ struct ReaderWebView: UIViewRepresentable {
             self.expectedBridgeToken = expectedBridgeToken
             self.currentHTML = currentHTML
             self.currentInitialProgress = currentInitialProgress
+            self.currentNavigationRequest = currentNavigationRequest
             self.currentSpeed = currentSpeed
             self.currentIsScrolling = currentIsScrolling
             self.onProgress = onProgress
@@ -165,7 +179,21 @@ struct ReaderWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             isDocumentReady = true
+            appliedNavigationRequestID = nil
             applyReaderState(to: webView)
+            applyNavigationIfNeeded(to: webView)
+        }
+
+        func applyNavigationIfNeeded(to webView: WKWebView) {
+            guard let request = currentNavigationRequest,
+                  request.id != appliedNavigationRequestID
+            else {
+                return
+            }
+            appliedNavigationRequestID = request.id
+            webView.evaluateJavaScript(
+                "window.ReaderFlow && window.ReaderFlow.scrollToHref(\(javaScriptStringLiteral(request.href)));"
+            )
         }
 
         func applyReaderState(to webView: WKWebView) {
@@ -187,6 +215,15 @@ struct ReaderWebView: UIViewRepresentable {
 
         private func boundedProgress(_ value: Double) -> Double {
             min(1, max(0, value))
+        }
+
+        private func javaScriptStringLiteral(_ value: String) -> String {
+            guard let data = try? JSONEncoder().encode(value),
+                  let encoded = String(data: data, encoding: .utf8)
+            else {
+                return "\"\""
+            }
+            return encoded
         }
 
         private func decode<T: Decodable>(_ type: T.Type, from object: Any?) -> T? {

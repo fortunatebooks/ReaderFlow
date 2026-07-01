@@ -73,8 +73,9 @@ struct ContinuousDocumentBuilder {
         let sanitizedBody = sanitizer.sanitizeHTML(chapter.bodyHTML)
         let title = chapter.title.htmlEscaped
         let href = chapter.href.htmlEscaped
+        let normalizedHref = (resolver.normalizedResourcePath(chapter.href) ?? chapter.href).htmlEscaped
         return """
-        <section id="rf-spine-\(index)" class="rf-chapter" data-spine-index="\(index)" data-href="\(href)" data-title="\(title)">
+        <section id="rf-spine-\(index)" class="rf-chapter" data-spine-index="\(index)" data-href="\(href)" data-normalized-href="\(normalizedHref)" data-title="\(title)">
           \(sanitizedBody)
         </section>
         """

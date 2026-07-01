@@ -71,19 +71,21 @@ final class ReaderResourceSchemeHandler: NSObject, WKURLSchemeHandler {
 
     private func resolveBookResource(_ url: URL) -> URL? {
         guard let bookResourceRootURL else { return nil }
-        let parts = url.pathComponents.filter { $0 != "/" }
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let parts = components.percentEncodedPath
+            .split(separator: "/")
+            .map(String.init)
         guard parts.count >= 2 else { return nil }
-        if let expectedBookId, parts.first != expectedBookId.uuidString {
+        guard expectedBookId.map({ $0.uuidString == parts[0] }) ?? true else {
             return nil
         }
-        let relativeParts = parts.dropFirst()
-        let candidate = relativeParts.reduce(bookResourceRootURL) { partial, component in
-            partial.appending(path: component)
-        }.standardizedFileURL
-        let root = bookResourceRootURL.standardizedFileURL
-        guard candidate.path.hasPrefix(root.path + "/") || candidate.path == root.path else {
-            return nil
-        }
+        let normalizedPath = parts.dropFirst().joined(separator: "/")
+        guard let candidate = EPUBResourceResolver.fileURL(
+            forNormalizedResourcePath: normalizedPath,
+            rootURL: bookResourceRootURL
+        ) else { return nil }
         guard fileManager.fileExists(atPath: candidate.path) else {
             return nil
         }

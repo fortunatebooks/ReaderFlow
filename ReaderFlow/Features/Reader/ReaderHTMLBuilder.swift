@@ -17,7 +17,7 @@ enum ReaderHTMLBuilder {
         </head>
         <body>
           <main id="book">
-            <section id="rf-spine-0" class="rf-chapter" data-spine-index="0" data-href="placeholder.xhtml" data-title="Imported Book">
+            <section id="rf-spine-0" class="rf-chapter" data-spine-index="0" data-href="placeholder.xhtml" data-normalized-href="placeholder.xhtml" data-title="Imported Book">
               <h1>\(escapedTitle)</h1>
               <p>This EPUB has been imported. The next implementation stage replaces this placeholder with sanitized EPUB chapter content from the continuous document builder.</p>
               <p>Select text here to exercise the excerpt bridge while the full EPUB renderer is being connected.</p>
@@ -88,7 +88,7 @@ enum ReaderWebAssets {
       let lastTime = null;
       let lastProgressPost = 0;
       let touchStart = null;
-      let suppressNextClick = false;
+      let suppressClickUntil = 0;
 
       const progress = () => {
         const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
@@ -250,8 +250,7 @@ enum ReaderWebAssets {
       });
 
       document.addEventListener('click', (event) => {
-        if (suppressNextClick) {
-          suppressNextClick = false;
+        if (Date.now() < suppressClickUntil) {
           return;
         }
         if (event.target && event.target.closest && event.target.closest('a')) {
@@ -294,7 +293,7 @@ enum ReaderWebAssets {
         }
 
         event.preventDefault();
-        suppressNextClick = true;
+        suppressClickUntil = Date.now() + 450;
         post('speedAdjustment', { delta: dy < 0 ? 5 : -5 });
       }, { passive: false });
 
@@ -308,6 +307,19 @@ enum ReaderWebAssets {
           const maxScroll = Math.max(0, documentHeight - viewportHeight);
           const target = Math.max(0, Math.min(1, Number(value) || 0));
           window.scrollTo(0, maxScroll * target);
+          post('progressChanged', progress());
+        },
+        scrollToHref(value) {
+          const href = String(value || '').split('#')[0];
+          if (!href) {
+            return;
+          }
+          const chapters = Array.from(document.querySelectorAll('.rf-chapter'));
+          const target = chapters.find((chapter) => chapter.dataset.normalizedHref === href || chapter.dataset.href === href);
+          if (!target) {
+            return;
+          }
+          target.scrollIntoView({ block: 'start' });
           post('progressChanged', progress());
         },
         start() {

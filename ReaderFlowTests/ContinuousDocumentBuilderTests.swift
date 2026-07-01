@@ -27,6 +27,7 @@ struct ContinuousDocumentBuilderTests {
 
         #expect(html.contains("id=\"rf-spine-0\""))
         #expect(html.contains("data-spine-index=\"0\""))
+        #expect(html.contains("data-normalized-href=\"OPS/chapter1.xhtml\""))
         #expect(html.contains("<p>Text</p>"))
         #expect(!html.localizedCaseInsensitiveContains("<script>alert"))
         #expect(!html.localizedCaseInsensitiveContains("onclick"))

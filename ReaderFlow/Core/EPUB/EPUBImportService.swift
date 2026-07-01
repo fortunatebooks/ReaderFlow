@@ -5,17 +5,20 @@ struct EPUBImportService {
     private let fileStore: AppFileStore
     private let archiveExpander: EPUBArchiveExpander
     private let packageParser: EPUBPackageParser
+    private let tableOfContentsParser: EPUBTableOfContentsParser
     private let preflightLimits: EPUBPreflightLimits
 
     init(
         fileStore: AppFileStore,
         archiveExpander: EPUBArchiveExpander = EPUBArchiveExpander(),
         packageParser: EPUBPackageParser = EPUBPackageParser(),
+        tableOfContentsParser: EPUBTableOfContentsParser = EPUBTableOfContentsParser(),
         preflightLimits: EPUBPreflightLimits = EPUBPreflightLimits()
     ) {
         self.fileStore = fileStore
         self.archiveExpander = archiveExpander
         self.packageParser = packageParser
+        self.tableOfContentsParser = tableOfContentsParser
         self.preflightLimits = preflightLimits
     }
 
@@ -52,6 +55,10 @@ struct EPUBImportService {
             guard package.readingOrder.count <= preflightLimits.maximumSpineItemCount else {
                 throw EPUBImportError.tooLarge
             }
+            let tableOfContents = (try? tableOfContentsParser.parseTableOfContents(
+                expandedRootURL: expandedArchive.rootURL,
+                package: package
+            )) ?? []
 
             return ImportedEPUBDraft(
                 id: bookId,
@@ -66,6 +73,7 @@ struct EPUBImportService {
                 fileSizeBytes: sourceSize,
                 preflight: preflight,
                 package: package,
+                tableOfContents: tableOfContents,
                 contentFingerprint: fingerprint
             )
         } catch {
@@ -139,6 +147,7 @@ struct ImportedEPUBDraft {
     var fileSizeBytes: Int64
     var preflight: EPUBPreflightResult
     var package: EPUBPackageDocument
+    var tableOfContents: [TableOfContentsEntry]
     var contentFingerprint: String
 
     func encodedAuthors() -> Data {
@@ -146,9 +155,13 @@ struct ImportedEPUBDraft {
     }
 
     func encodedTableOfContents() -> Data {
-        let entries = package.readingOrder.map { item in
-            TableOfContentsEntry(title: item.href, href: item.href, children: [])
-        }
+        let entries = tableOfContents.isEmpty
+            ? package.readingOrder.compactMap { item in
+                package.resourceResolver.normalizedResourcePath(item.href).map {
+                    TableOfContentsEntry(title: item.href, href: $0, children: [])
+                }
+            }
+            : tableOfContents
         return (try? JSONEncoder().encode(TableOfContentsPayload(entries: entries))) ?? Data()
     }
 }

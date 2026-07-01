@@ -13,6 +13,8 @@ struct ReaderView: View {
     @State private var confirmationText: String?
     @State private var readerHTML: String?
     @State private var readerLoadError: String?
+    @State private var showingTableOfContents = false
+    @State private var navigationRequest: ReaderNavigationRequest?
     @State private var bridgeToken = UUID().uuidString
 
     private var activeSettings: ReaderSettingsEntity {
@@ -31,6 +33,7 @@ struct ReaderView: View {
                 expectedBookId: book.id,
                 bookResourceRootURL: bookResourceRootURL,
                 initialProgress: book.readingProgress,
+                navigationRequest: navigationRequest,
                 speed: $speed,
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
@@ -68,7 +71,14 @@ struct ReaderView: View {
         .navigationTitle(book.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    showingTableOfContents = true
+                } label: {
+                    Label("Contents", systemImage: "list.bullet")
+                }
+                .disabled(tableOfContentsEntries.isEmpty)
+
                 NavigationLink {
                     BookExcerptsView(book: book)
                 } label: {
@@ -90,6 +100,13 @@ struct ReaderView: View {
         .onChange(of: speed) { _, newSpeed in
             activeSettings.autoscrollSpeed = newSpeed
             try? modelContext.save()
+        }
+        .sheet(isPresented: $showingTableOfContents) {
+            NavigationStack {
+                TableOfContentsListView(entries: tableOfContentsEntries) { entry in
+                    navigateToTableOfContentsEntry(entry)
+                }
+            }
         }
     }
 
@@ -144,6 +161,15 @@ struct ReaderView: View {
 
     private var bookResourceRootURL: URL? {
         expandedRootURL(bookId: book.id, expandedDirectoryName: book.expandedDirectoryName)
+    }
+
+    private var tableOfContentsEntries: [TableOfContentsEntry] {
+        guard let data = book.tableOfContentsJSON,
+              let payload = try? JSONDecoder().decode(TableOfContentsPayload.self, from: data)
+        else {
+            return []
+        }
+        return payload.entries
     }
 
     @MainActor
@@ -245,6 +271,11 @@ struct ReaderView: View {
         }
     }
 
+    private func navigateToTableOfContentsEntry(_ entry: TableOfContentsEntry) {
+        navigationRequest = ReaderNavigationRequest(id: UUID(), href: entry.href)
+        showingTableOfContents = false
+    }
+
     private func saveSelection(_ selection: ReaderSelectionPayload) {
         let encoder = JSONEncoder()
         let locatorData = (try? encoder.encode(selection.locator)) ?? Data()
@@ -272,6 +303,59 @@ struct ReaderView: View {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
             confirmationText = nil
+        }
+    }
+}
+
+private struct TableOfContentsListView: View {
+    let entries: [TableOfContentsEntry]
+    let onSelect: (TableOfContentsEntry) -> Void
+
+    private var flattenedEntries: [FlattenedTableOfContentsEntry] {
+        FlattenedTableOfContentsEntry.flatten(entries)
+    }
+
+    var body: some View {
+        List(flattenedEntries) { item in
+            Button {
+                onSelect(item.entry)
+            } label: {
+                HStack(spacing: 10) {
+                    Color.clear
+                        .frame(width: CGFloat(item.level * 14), height: 1)
+                    Text(item.entry.title)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Contents")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct FlattenedTableOfContentsEntry: Identifiable {
+    var id: String
+    var entry: TableOfContentsEntry
+    var level: Int
+
+    static func flatten(_ entries: [TableOfContentsEntry]) -> [FlattenedTableOfContentsEntry] {
+        flatten(entries, level: 0, path: "")
+    }
+
+    private static func flatten(
+        _ entries: [TableOfContentsEntry],
+        level: Int,
+        path: String
+    ) -> [FlattenedTableOfContentsEntry] {
+        entries.enumerated().flatMap { index, entry in
+            let entryPath = path.isEmpty ? "\(index)" : "\(path).\(index)"
+            return [
+                FlattenedTableOfContentsEntry(id: entryPath + entry.id, entry: entry, level: level),
+            ] + flatten(entry.children, level: level + 1, path: entryPath)
         }
     }
 }

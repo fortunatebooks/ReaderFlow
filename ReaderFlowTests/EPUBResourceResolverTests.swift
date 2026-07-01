@@ -104,6 +104,7 @@ struct EPUBContentLoaderTests {
                 <a href="chapter2.xhtml#next">Next</a>
                 <a href="chapter2.xhtml">Next chapter</a>
                 <a href="#local-note">Local</a>
+                <p id="local-note">Local note.</p>
                 <img src="../../secret.png"/>
                 <img src="https://example.com/remote.png"/>
                 <script>alert(1)</script>
@@ -120,7 +121,7 @@ struct EPUBContentLoaderTests {
             <html xmlns="http://www.w3.org/1999/xhtml">
               <body>
                 <h2>Second Chapter</h2>
-                <p>Second text.</p>
+                <p id="next">Second text.</p>
               </body>
             </html>
             """,
@@ -196,9 +197,11 @@ struct EPUBContentLoaderTests {
         #expect(chapters[0].bodyHTML.contains("src=\"readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover%20art.jpg\""))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover-small.jpg 1x"))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/cover%20large.jpg 2x"))
-        #expect(!chapters[0].bodyHTML.contains("href=\"#next\""))
+        #expect(chapters[1].bodyHTML.contains("id=\"rf-spine-1-next\""))
+        #expect(chapters[0].bodyHTML.contains("href=\"#rf-spine-1-next\""))
         #expect(chapters[0].bodyHTML.contains("href=\"#rf-spine-1\""))
-        #expect(chapters[0].bodyHTML.contains("href=\"#rf-spine-0\""))
+        #expect(chapters[0].bodyHTML.contains("id=\"rf-spine-0-local-note\""))
+        #expect(chapters[0].bodyHTML.contains("href=\"#rf-spine-0-local-note\""))
         #expect(chapters[0].bodyHTML.contains("readerflow://book/22222222-2222-2222-2222-222222222222/OEBPS/Images/bg.jpg"))
         #expect(!chapters[0].bodyHTML.localizedCaseInsensitiveContains("<script"))
         #expect(!chapters[0].bodyHTML.contains("https://example.com"))
@@ -377,6 +380,69 @@ struct EPUBPackageParserTests {
         #expect(package.packageRoot == "OEBPS")
         #expect(package.readingOrder.first?.href == "Text/chapter.xhtml")
         #expect(package.resourceResolver.normalizedResourcePath("Text/chapter.xhtml") == "OEBPS/Text/chapter.xhtml")
+    }
+
+    @Test func parsesNavigationTableOfContents() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("ReaderFlowTOCTests")
+            .appendingPathComponent(UUID().uuidString)
+
+        defer {
+            try? fileManager.removeItem(at: rootURL)
+        }
+
+        try fileManager.createDirectory(
+            at: rootURL.appendingPathComponent("OEBPS"),
+            withIntermediateDirectories: true
+        )
+        try write(
+            """
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <body>
+                <nav epub:type="toc">
+                  <ol>
+                    <li>
+                      <a href="Text/chapter1.xhtml">Chapter One</a>
+                      <ol>
+                        <li><a href="Text/chapter2.xhtml#note">Chapter Two Note</a></li>
+                      </ol>
+                    </li>
+                  </ol>
+                </nav>
+              </body>
+            </html>
+            """,
+            to: rootURL
+                .appendingPathComponent("OEBPS")
+                .appendingPathComponent("nav.xhtml")
+        )
+
+        let package = EPUBPackageDocument(
+            opfPath: "OEBPS/package.opf",
+            packageRoot: "OEBPS",
+            metadata: .empty,
+            manifest: [
+                EPUBManifestItem(id: "nav", href: "nav.xhtml", mediaType: "application/xhtml+xml", properties: ["nav"]),
+                EPUBManifestItem(id: "chapter-1", href: "Text/chapter1.xhtml", mediaType: "application/xhtml+xml", properties: []),
+                EPUBManifestItem(id: "chapter-2", href: "Text/chapter2.xhtml", mediaType: "application/xhtml+xml", properties: []),
+            ],
+            spine: [
+                EPUBSpineItem(idref: "chapter-1", linear: true),
+                EPUBSpineItem(idref: "chapter-2", linear: true),
+            ]
+        )
+
+        let entries = try EPUBTableOfContentsParser().parseTableOfContents(
+            expandedRootURL: rootURL,
+            package: package
+        )
+
+        #expect(entries.count == 1)
+        #expect(entries.first?.title == "Chapter One")
+        #expect(entries.first?.href == "OEBPS/Text/chapter1.xhtml")
+        #expect(entries.first?.children.first?.title == "Chapter Two Note")
+        #expect(entries.first?.children.first?.href == "OEBPS/Text/chapter2.xhtml#note")
     }
 
     @Test func rejectsUnsafeContainerRootfilePath() throws {
