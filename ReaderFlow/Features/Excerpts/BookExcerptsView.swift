@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct BookExcerptsView: View {
     @Environment(\.modelContext) private var modelContext
@@ -36,11 +37,12 @@ struct BookExcerptsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 ShareLink(
-                    item: ExcerptTextExporter().export(
+                    item: ExcerptTextExportFile.book(
                         bookTitle: book.title,
                         author: book.authorDisplay,
                         excerpts: bookExcerpts
-                    )
+                    ),
+                    preview: SharePreview(ExcerptTextExporter().bookExportFilename(bookTitle: book.title))
                 ) {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
@@ -116,7 +118,10 @@ struct AllExcerptsView: View {
         .navigationTitle("Saved Excerpts")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                ShareLink(item: ExcerptTextExporter().exportLibrary(excerpts: excerpts)) {
+                ShareLink(
+                    item: ExcerptTextExportFile.library(excerpts: excerpts),
+                    preview: SharePreview(ExcerptTextExporter().libraryExportFilename())
+                ) {
                     Label("Export All", systemImage: "square.and.arrow.up")
                 }
                 .disabled(excerpts.isEmpty)
@@ -162,9 +167,17 @@ private struct ArchivedBookExcerptsView: View {
         }
         .navigationTitle(title)
         .toolbar {
-            ShareLink(item: ExcerptTextExporter().export(bookTitle: title, author: excerpts.first?.authorDisplaySnapshot ?? "Unknown Author", excerpts: excerpts)) {
+            ShareLink(
+                item: ExcerptTextExportFile.book(
+                    bookTitle: title,
+                    author: excerpts.first?.authorDisplaySnapshot ?? "Unknown Author",
+                    excerpts: excerpts
+                ),
+                preview: SharePreview(ExcerptTextExporter().bookExportFilename(bookTitle: title))
+            ) {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
+            .disabled(excerpts.isEmpty)
         }
     }
 }
@@ -177,14 +190,30 @@ private struct ExcerptRow: View {
             Text(excerpt.selectedText)
                 .font(.body)
                 .lineLimit(5)
-            HStack {
+            HStack(spacing: 8) {
                 Text(excerpt.chapterTitle ?? "Unknown chapter")
-                Spacer()
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text("\(Int(excerpt.sortProgress * 100))%")
+                Text("·")
                 Text(excerpt.createdAt, style: .date)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+        .contextMenu {
+            ShareLink(
+                item: ExcerptTextExportFile.singleExcerpt(excerpt),
+                preview: SharePreview(ExcerptTextExporter().singleExcerptExportFilename(bookTitle: excerpt.bookTitleSnapshot))
+            ) {
+                Label("Share Excerpt", systemImage: "square.and.arrow.up")
+            }
+            Button {
+                UIPasteboard.general.string = ExcerptTextExporter().export(excerpt: excerpt)
+            } label: {
+                Label("Copy Excerpt", systemImage: "doc.on.doc")
+            }
+        }
     }
 }

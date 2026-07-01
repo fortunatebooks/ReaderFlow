@@ -1,6 +1,18 @@
 import Foundation
 
 struct ExcerptTextExporter {
+    func bookExportFilename(bookTitle: String) -> String {
+        "ReaderFlow - \(sanitizedFilenameComponent(bookTitle, fallback: "Untitled Book")) - Excerpts.txt"
+    }
+
+    func libraryExportFilename() -> String {
+        "ReaderFlow - All Excerpts.txt"
+    }
+
+    func singleExcerptExportFilename(bookTitle: String) -> String {
+        "ReaderFlow - \(sanitizedFilenameComponent(bookTitle, fallback: "Untitled Book")) - Excerpt.txt"
+    }
+
     func export(bookTitle: String, author: String, excerpts: [ExcerptEntity], exportedAt: Date = .now) -> String {
         var output = """
         ReaderFlow Excerpts
@@ -29,6 +41,15 @@ struct ExcerptTextExporter {
         }
 
         return output
+    }
+
+    func export(excerpt: ExcerptEntity, exportedAt: Date = .now) -> String {
+        export(
+            bookTitle: excerpt.bookTitleSnapshot,
+            author: excerpt.authorDisplaySnapshot,
+            excerpts: [excerpt],
+            exportedAt: exportedAt
+        )
     }
 
     func exportLibrary(excerpts: [ExcerptEntity], exportedAt: Date = .now) -> String {
@@ -74,6 +95,20 @@ struct ExcerptTextExporter {
         }
 
         return output
+    }
+
+    private func sanitizedFilenameComponent(_ value: String, fallback: String) -> String {
+        let unsafeCharacters = CharacterSet(charactersIn: "/\\?%*|\"<>:\n\r\t")
+            .union(.controlCharacters)
+        let pieces = value.components(separatedBy: unsafeCharacters)
+        let sanitized = pieces
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        guard !sanitized.isEmpty else {
+            return fallback
+        }
+        return String(sanitized.prefix(80))
     }
 }
 
