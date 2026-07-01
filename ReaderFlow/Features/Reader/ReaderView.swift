@@ -39,6 +39,7 @@ struct ReaderView: View {
     @State private var lastProgressSaveAt: Date?
     @State private var trailingProgressSaveTask: Task<Void, Never>?
     @State private var shouldPersistNextProgressImmediately = false
+    @State private var readingProgressStore: ReadingProgressStore?
     @State private var bridgeToken = UUID().uuidString
     @State private var hasCompletedInitialAppear = false
 
@@ -119,6 +120,7 @@ struct ReaderView: View {
         }
         .onAppear {
             ensureSettings()
+            ensureReadingProgressStore()
             speed = activeSettings.autoscrollSpeed
             guard !hasCompletedInitialAppear else { return }
             hasCompletedInitialAppear = true
@@ -219,6 +221,9 @@ struct ReaderView: View {
         guard initialPosition == nil else {
             return initialProgressValue
         }
+        if let lastProgressMessage {
+            return lastProgressMessage.boundedTotalProgression
+        }
         return book.readerInitialPosition?.progress ?? book.readingProgress
     }
 
@@ -314,6 +319,11 @@ struct ReaderView: View {
         try? modelContext.save()
     }
 
+    private func ensureReadingProgressStore() {
+        guard readingProgressStore == nil else { return }
+        readingProgressStore = ReadingProgressStore(modelContainer: modelContext.container)
+    }
+
     private func saveProgress(_ progress: ReaderProgressMessage) {
         guard readerHTML != nil else { return }
         lastProgressMessage = progress
@@ -333,11 +343,11 @@ struct ReaderView: View {
         trailingProgressSaveTask?.cancel()
         trailingProgressSaveTask = nil
         lastProgressSaveAt = .now
-        book.readingProgress = progress.boundedTotalProgression
-        book.lastLocatorJSON = progress.encodedLocator(bookId: book.id, bookFingerprint: book.contentFingerprint)
-        book.lastOpenedAt = .now
-        book.lastOpenedSortKey = .now
-        try? modelContext.save()
+        let update = progress.readingProgressUpdate(bookId: book.id, bookFingerprint: book.contentFingerprint)
+        let progressStore = readingProgressStore ?? ReadingProgressStore(modelContainer: modelContext.container)
+        Task {
+            try? await progressStore.save(update)
+        }
     }
 
     private var shouldPersistRoutineProgress: Bool {
@@ -615,7 +625,21 @@ private extension ReaderProgressMessage {
         bounded(totalProgression)
     }
 
+    func readingProgressUpdate(bookId: UUID, bookFingerprint: String, openedAt: Date = .now) -> ReadingProgressUpdate {
+        ReadingProgressUpdate(
+            bookId: bookId,
+            bookFingerprint: bookFingerprint,
+            readingProgress: boundedTotalProgression,
+            locatorJSON: encodedLocator(bookId: bookId, bookFingerprint: bookFingerprint, createdAt: openedAt),
+            openedAt: openedAt
+        )
+    }
+
     func encodedLocator(bookId: UUID, bookFingerprint: String) -> Data? {
+        encodedLocator(bookId: bookId, bookFingerprint: bookFingerprint, createdAt: .now)
+    }
+
+    private func encodedLocator(bookId: UUID, bookFingerprint: String, createdAt: Date) -> Data? {
         let locator = ReaderLocator(
             bookId: bookId,
             bookFingerprint: bookFingerprint,
@@ -630,7 +654,7 @@ private extension ReaderProgressMessage {
             domTextPath: nil,
             contentHash: nil,
             readiumLocatorJSON: nil,
-            createdAt: .now
+            createdAt: createdAt
         )
         return try? JSONEncoder().encode(locator)
     }
