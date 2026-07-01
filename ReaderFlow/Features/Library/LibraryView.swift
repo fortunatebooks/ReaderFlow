@@ -8,6 +8,7 @@ struct LibraryView: View {
     @Query(sort: \ExcerptEntity.createdAt, order: .reverse) private var excerpts: [ExcerptEntity]
     @State private var showingImporter = false
     @State private var importError: String?
+    @State private var archiveError: String?
     @State private var searchText = ""
     @State private var sortMode: LibrarySortMode = .recent
     @State private var pendingArchiveBook: BookEntity?
@@ -87,6 +88,13 @@ struct LibraryView: View {
                 }
             } message: {
                 Text(importError ?? "")
+            }
+            .alert("Delete Local Copy Failed", isPresented: archiveErrorBinding) {
+                Button("OK") {
+                    archiveError = nil
+                }
+            } message: {
+                Text(archiveError ?? "")
             }
             .alert("Delete Local Copy?", isPresented: archiveConfirmationBinding) {
                 Button("Delete Local Copy", role: .destructive) {
@@ -227,6 +235,16 @@ struct LibraryView: View {
         }
     }
 
+    private var archiveErrorBinding: Binding<Bool> {
+        Binding {
+            archiveError != nil
+        } set: { isPresented in
+            if !isPresented {
+                archiveError = nil
+            }
+        }
+    }
+
     private func handleImportResult(_ result: Result<[URL], Error>) {
         do {
             guard let url = try result.get().first else { return }
@@ -289,17 +307,34 @@ struct LibraryView: View {
     }
 
     private func archive(_ book: BookEntity) {
-        if let store = try? AppFileStore() {
-            try? store.removeBookFiles(bookId: book.id)
+        let operation = BookArchiveOperation(archivedAt: .now)
+        let relatedExcerpts = excerpts.filter { $0.bookId == book.id }
+        let snapshot = BookArchiveSnapshot(book: book, excerpts: relatedExcerpts)
+        operation.markArchived(book: book, excerpts: relatedExcerpts)
+
+        do {
+            try modelContext.save()
+        } catch {
+            snapshot.restore()
+            try? modelContext.save()
+            archiveError = "ReaderFlow could not update the library. The local EPUB was not deleted."
+            return
         }
-        book.isArchived = true
-        book.archivedAt = .now
-        book.deletedFileAt = .now
-        book.importStatus = BookImportStatus.archived.rawValue
-        for excerpt in excerpts where excerpt.bookId == book.id {
-            excerpt.sourceBookAvailable = false
+
+        do {
+            let store = try AppFileStore()
+            try store.removeBookFiles(bookId: book.id)
+        } catch {
+            archiveError = "ReaderFlow archived this book, but could not remove all local files from this device."
+            return
         }
-        try? modelContext.save()
+
+        operation.markFilesDeleted(book: book)
+        do {
+            try modelContext.save()
+        } catch {
+            archiveError = "ReaderFlow deleted the local files, but could not update the cleanup status."
+        }
     }
 }
 
