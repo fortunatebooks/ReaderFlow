@@ -54,6 +54,17 @@ struct SettingsView: View {
                     }
                 }
 
+                LabeledContent("Margins") {
+                    Stepper(
+                        value: binding(activeSettings, \.marginScale),
+                        in: 0.75 ... 1.6,
+                        step: 0.05
+                    ) {
+                        Text(activeSettings.marginScale, format: .number.precision(.fractionLength(2)))
+                            .monospacedDigit()
+                    }
+                }
+
                 LabeledContent("Speed") {
                     Stepper(value: binding(activeSettings, \.autoscrollSpeed), in: 5 ... 120, step: 5) {
                         Text("\(Int(activeSettings.autoscrollSpeed))")

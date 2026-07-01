@@ -28,4 +28,22 @@ struct ContinuousDocumentBuilderTests {
         #expect(!html.localizedCaseInsensitiveContains("onclick"))
         #expect(html.contains("window.__readerFlowBridgeToken"))
     }
+
+    @Test func emitsReaderSettingsCSSVariables() {
+        let settings = ReaderDocumentSettings(
+            textSize: 20,
+            lineHeight: 1.7,
+            marginScale: 1.25,
+            theme: .dark,
+            fontFamily: .systemSans
+        )
+
+        let css = settings.cssCustomProperties
+
+        #expect(css.contains("--rf-bg: #121212;"))
+        #expect(css.contains("--rf-font-family: -apple-system"))
+        #expect(css.contains("--rf-text-size: 20.0px;"))
+        #expect(css.contains("--rf-line-height: 1.7;"))
+        #expect(css.contains("--rf-horizontal-padding: 28px;"))
+    }
 }

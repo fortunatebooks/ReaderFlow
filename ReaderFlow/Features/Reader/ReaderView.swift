@@ -81,8 +81,12 @@ struct ReaderView: View {
             book.lastOpenedSortKey = .now
             try? modelContext.save()
         }
-        .task(id: book.id) {
+        .task(id: readerDocumentReloadID) {
             await loadReaderHTML()
+        }
+        .onChange(of: speed) { _, newSpeed in
+            activeSettings.autoscrollSpeed = newSpeed
+            try? modelContext.save()
         }
         .onTapGesture {
             withAnimation(.easeOut(duration: 0.2)) {
@@ -127,6 +131,18 @@ struct ReaderView: View {
             settings: activeSettings,
             bridgeToken: bridgeToken
         )
+    }
+
+    private var readerDocumentReloadID: String {
+        [
+            book.id.uuidString,
+            book.expandedDirectoryName ?? "expanded",
+            activeSettings.theme,
+            activeSettings.fontFamily,
+            String(format: "%.2f", activeSettings.textSize),
+            String(format: "%.2f", activeSettings.lineHeight),
+            String(format: "%.2f", activeSettings.marginScale),
+        ].joined(separator: "|")
     }
 
     private var bookResourceRootURL: URL? {

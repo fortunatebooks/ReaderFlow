@@ -10,7 +10,7 @@ body {
 }
 
 body {
-  padding: 18vh 22px 32vh;
+  padding: 18vh var(--rf-horizontal-padding, 22px) 32vh;
 }
 
 main {
@@ -23,7 +23,6 @@ p {
 }
 
 .rf-highlight {
-  background: rgba(255, 214, 94, 0.58);
+  background: var(--rf-selection, rgba(255, 214, 94, 0.58));
   border-radius: 3px;
 }
-

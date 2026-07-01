@@ -3,8 +3,7 @@ import Foundation
 enum ReaderHTMLBuilder {
     static func placeholderHTML(book: BookEntity, settings: ReaderSettingsEntity, bridgeToken: String) -> String {
         let escapedTitle = book.title.htmlEscaped
-        let textSize = settings.textSize
-        let lineHeight = settings.lineHeight
+        let documentSettings = ReaderDocumentSettings(settings)
         let escapedBridgeToken = bridgeToken.htmlEscaped
         return """
         <!doctype html>
@@ -13,10 +12,7 @@ enum ReaderHTMLBuilder {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
             \(ReaderWebAssets.css)
-            :root {
-              --rf-text-size: \(textSize)px;
-              --rf-line-height: \(lineHeight);
-            }
+            \(documentSettings.cssCustomProperties)
           </style>
         </head>
         <body>
@@ -46,14 +42,14 @@ enum ReaderWebAssets {
     html, body {
       margin: 0;
       padding: 0;
-      background: #fbfaf7;
-      color: #171717;
-      font-family: ui-serif, Georgia, serif;
+      background: var(--rf-bg, #fbfaf7);
+      color: var(--rf-text, #171717);
+      font-family: var(--rf-font-family, ui-serif, Georgia, serif);
       font-size: var(--rf-text-size, 18px);
       line-height: var(--rf-line-height, 1.55);
     }
     body {
-      padding: 18vh 22px 32vh;
+      padding: 18vh var(--rf-horizontal-padding, 22px) 32vh;
     }
     main {
       max-width: 42rem;
@@ -68,7 +64,7 @@ enum ReaderWebAssets {
       margin: 0 0 1.05rem;
     }
     .rf-highlight {
-      background: rgba(255, 214, 94, 0.58);
+      background: var(--rf-selection, rgba(255, 214, 94, 0.58));
       border-radius: 3px;
     }
     """
