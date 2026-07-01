@@ -4,12 +4,14 @@ import UIKit
 
 struct ReaderView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var settings: [ReaderSettingsEntity]
     @Query(sort: \ExcerptEntity.sortProgress) private var excerpts: [ExcerptEntity]
     let book: BookEntity
     let initialPosition: ReaderInitialPosition?
     let initialHighlightId: UUID?
     let initialProgressValue: Double
+    private let routineProgressSaveInterval: TimeInterval = 1
 
     @State private var pendingInitialNavigationRequest: ReaderNavigationRequest?
     init(book: BookEntity, initialPosition: ReaderInitialPosition? = nil, initialHighlightId: UUID? = nil) {
@@ -30,7 +32,13 @@ struct ReaderView: View {
     @State private var readerHTML: String?
     @State private var readerLoadError: String?
     @State private var showingTableOfContents = false
+    @State private var showingSettings = false
     @State private var navigationRequest: ReaderNavigationRequest?
+    @State private var progressRequestID: UUID?
+    @State private var lastProgressMessage: ReaderProgressMessage?
+    @State private var lastProgressSaveAt: Date?
+    @State private var trailingProgressSaveTask: Task<Void, Never>?
+    @State private var shouldPersistNextProgressImmediately = false
     @State private var bridgeToken = UUID().uuidString
     @State private var hasCompletedInitialAppear = false
 
@@ -52,6 +60,7 @@ struct ReaderView: View {
                 initialProgress: effectiveInitialProgress,
                 navigationRequest: readerHTML == nil ? nil : effectiveNavigationRequest,
                 highlights: readerHighlightPayloads,
+                progressRequestID: progressRequestID,
                 speed: $speed,
                 isScrolling: $isScrolling,
                 onProgress: saveProgress,
@@ -120,8 +129,11 @@ struct ReaderView: View {
             showExcerptJumpConfirmationIfNeeded()
         }
         .onDisappear {
-            isScrolling = false
-            showControls = true
+            trailingProgressSaveTask?.cancel()
+            if let lastProgressMessage {
+                persistProgress(lastProgressMessage)
+            }
+            pauseReaderAndFlushProgress(animated: false)
         }
         .task(id: readerDocumentReloadID) {
             await loadReaderHTML()
@@ -130,11 +142,21 @@ struct ReaderView: View {
             activeSettings.autoscrollSpeed = newSpeed
             try? modelContext.save()
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase != .active {
+                pauseReaderAndFlushProgress(animated: false)
+            }
+        }
         .sheet(isPresented: $showingTableOfContents) {
             NavigationStack {
                 TableOfContentsListView(entries: tableOfContentsEntries) { entry in
                     navigateToTableOfContentsEntry(entry)
                 }
+            }
+        }
+        .sheet(isPresented: $showingSettings) {
+            NavigationStack {
+                SettingsView()
             }
         }
     }
@@ -143,7 +165,7 @@ struct ReaderView: View {
         VStack(spacing: 12) {
             HStack {
                 Button {
-                    isScrolling.toggle()
+                    setReaderScrolling(!isScrolling)
                 } label: {
                     Label(isScrolling ? "Pause" : "Start", systemImage: isScrolling ? "pause.fill" : "play.fill")
                 }
@@ -157,8 +179,9 @@ struct ReaderView: View {
                     .frame(width: 34, alignment: .trailing)
             }
 
-            NavigationLink {
-                SettingsView()
+            Button {
+                pauseReaderAndFlushProgress()
+                showingSettings = true
             } label: {
                 Label("Reader Settings", systemImage: "textformat.size")
                     .font(.callout)
@@ -293,11 +316,56 @@ struct ReaderView: View {
 
     private func saveProgress(_ progress: ReaderProgressMessage) {
         guard readerHTML != nil else { return }
-        book.readingProgress = progress.totalProgression
+        lastProgressMessage = progress
+        if shouldPersistNextProgressImmediately {
+            shouldPersistNextProgressImmediately = false
+            persistProgress(progress)
+            return
+        }
+        guard shouldPersistRoutineProgress else {
+            scheduleTrailingProgressSave()
+            return
+        }
+        persistProgress(progress)
+    }
+
+    private func persistProgress(_ progress: ReaderProgressMessage) {
+        trailingProgressSaveTask?.cancel()
+        trailingProgressSaveTask = nil
+        lastProgressSaveAt = .now
+        book.readingProgress = progress.boundedTotalProgression
         book.lastLocatorJSON = progress.encodedLocator(bookId: book.id, bookFingerprint: book.contentFingerprint)
         book.lastOpenedAt = .now
         book.lastOpenedSortKey = .now
         try? modelContext.save()
+    }
+
+    private var shouldPersistRoutineProgress: Bool {
+        guard let lastProgressSaveAt else {
+            return true
+        }
+        return Date.now.timeIntervalSince(lastProgressSaveAt) >= routineProgressSaveInterval
+    }
+
+    private func scheduleTrailingProgressSave() {
+        trailingProgressSaveTask?.cancel()
+        let delay = trailingProgressSaveDelay
+        trailingProgressSaveTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
+            }
+            guard let lastProgressMessage else { return }
+            persistProgress(lastProgressMessage)
+        }
+    }
+
+    private var trailingProgressSaveDelay: TimeInterval {
+        guard let lastProgressSaveAt else {
+            return 0
+        }
+        return max(0.05, routineProgressSaveInterval - Date.now.timeIntervalSince(lastProgressSaveAt))
     }
 
     private func readerDidBecomeReady() {
@@ -318,9 +386,34 @@ struct ReaderView: View {
     }
 
     private func toggleReaderPlayback() {
-        withAnimation(.easeOut(duration: 0.2)) {
-            isScrolling.toggle()
-            showControls = !isScrolling
+        setReaderScrolling(!isScrolling)
+    }
+
+    private func setReaderScrolling(_ isRunning: Bool, animated: Bool = true) {
+        let updates = {
+            isScrolling = isRunning
+            showControls = !isRunning
+        }
+        if animated {
+            withAnimation(.easeOut(duration: 0.2), updates)
+        } else {
+            updates()
+        }
+        if !isRunning {
+            requestProgressFlush()
+        }
+    }
+
+    private func pauseReaderAndFlushProgress(animated: Bool = true) {
+        setReaderScrolling(false, animated: animated)
+    }
+
+    private func requestProgressFlush() {
+        guard readerHTML != nil else { return }
+        shouldPersistNextProgressImmediately = true
+        progressRequestID = UUID()
+        if let lastProgressMessage {
+            persistProgress(lastProgressMessage)
         }
     }
 
@@ -354,6 +447,7 @@ struct ReaderView: View {
         withAnimation(.easeOut(duration: 0.2)) {
             showControls = true
         }
+        requestProgressFlush()
         switch state.reason {
         case "manualScroll":
             showTransientReaderMessage("Paused")
@@ -517,6 +611,10 @@ private extension ReaderNavigationRequest {
 }
 
 private extension ReaderProgressMessage {
+    var boundedTotalProgression: Double {
+        bounded(totalProgression)
+    }
+
     func encodedLocator(bookId: UUID, bookFingerprint: String) -> Data? {
         let locator = ReaderLocator(
             bookId: bookId,

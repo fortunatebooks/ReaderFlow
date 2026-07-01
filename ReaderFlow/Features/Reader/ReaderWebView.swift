@@ -58,6 +58,7 @@ struct ReaderWebView: UIViewRepresentable {
     let initialProgress: Double
     let navigationRequest: ReaderNavigationRequest?
     let highlights: [ReaderHighlightPayload]
+    let progressRequestID: UUID?
     @Binding var speed: Double
     @Binding var isScrolling: Bool
     var onProgress: (ReaderProgressMessage) -> Void
@@ -75,6 +76,7 @@ struct ReaderWebView: UIViewRepresentable {
             currentInitialProgress: initialProgress,
             currentNavigationRequest: navigationRequest,
             currentHighlights: highlights,
+            currentProgressRequestID: progressRequestID,
             currentSpeed: speed,
             currentIsScrolling: isScrolling,
             onProgress: onProgress,
@@ -116,6 +118,7 @@ struct ReaderWebView: UIViewRepresentable {
         context.coordinator.currentInitialProgress = initialProgress
         context.coordinator.currentNavigationRequest = navigationRequest
         context.coordinator.currentHighlights = highlights
+        context.coordinator.currentProgressRequestID = progressRequestID
         context.coordinator.currentSpeed = speed
         context.coordinator.currentIsScrolling = isScrolling
         if context.coordinator.currentHTML != html {
@@ -124,6 +127,7 @@ struct ReaderWebView: UIViewRepresentable {
             context.coordinator.hasAppliedInitialProgress = false
             context.coordinator.appliedHighlightsSignature = nil
             context.coordinator.appliedNavigationRequestID = nil
+            context.coordinator.appliedProgressRequestID = nil
             webView.loadHTMLString(html, baseURL: nil)
             return
         }
@@ -132,7 +136,14 @@ struct ReaderWebView: UIViewRepresentable {
             context.coordinator.applyReaderState(to: webView)
             context.coordinator.applyHighlightsIfNeeded(to: webView)
             context.coordinator.applyNavigationIfNeeded(to: webView)
+            context.coordinator.applyProgressRequestIfNeeded(to: webView)
         }
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.reportProgressBeforeDismantle(from: webView)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "readerFlow")
+        webView.navigationDelegate = nil
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
@@ -141,8 +152,10 @@ struct ReaderWebView: UIViewRepresentable {
         var currentInitialProgress: Double
         var currentNavigationRequest: ReaderNavigationRequest?
         var currentHighlights: [ReaderHighlightPayload]
+        var currentProgressRequestID: UUID?
         var appliedNavigationRequestID: UUID?
         var appliedHighlightsSignature: String?
+        var appliedProgressRequestID: UUID?
         var currentSpeed: Double
         var currentIsScrolling: Bool
         var isDocumentReady = false
@@ -161,6 +174,7 @@ struct ReaderWebView: UIViewRepresentable {
             currentInitialProgress: Double,
             currentNavigationRequest: ReaderNavigationRequest?,
             currentHighlights: [ReaderHighlightPayload],
+            currentProgressRequestID: UUID?,
             currentSpeed: Double,
             currentIsScrolling: Bool,
             onProgress: @escaping (ReaderProgressMessage) -> Void,
@@ -176,6 +190,7 @@ struct ReaderWebView: UIViewRepresentable {
             self.currentInitialProgress = currentInitialProgress
             self.currentNavigationRequest = currentNavigationRequest
             self.currentHighlights = currentHighlights
+            self.currentProgressRequestID = currentProgressRequestID
             self.currentSpeed = currentSpeed
             self.currentIsScrolling = currentIsScrolling
             self.onProgress = onProgress
@@ -237,6 +252,7 @@ struct ReaderWebView: UIViewRepresentable {
             applyReaderState(to: webView)
             applyHighlightsIfNeeded(to: webView)
             applyNavigationIfNeeded(to: webView)
+            applyProgressRequestIfNeeded(to: webView)
         }
 
         func applyNavigationIfNeeded(to webView: WKWebView) {
@@ -277,6 +293,24 @@ struct ReaderWebView: UIViewRepresentable {
                 return
             }
             webView.evaluateJavaScript("window.ReaderFlow && window.ReaderFlow.applyHighlights(\(json));")
+        }
+
+        func applyProgressRequestIfNeeded(to webView: WKWebView) {
+            guard let requestID = currentProgressRequestID,
+                  requestID != appliedProgressRequestID
+            else {
+                return
+            }
+            appliedProgressRequestID = requestID
+            webView.evaluateJavaScript("window.ReaderFlow && window.ReaderFlow.reportProgress();")
+        }
+
+        func reportProgressBeforeDismantle(from webView: WKWebView) {
+            webView.evaluateJavaScript("window.ReaderFlow && window.ReaderFlow.reportProgress();") { [onProgress] result, _ in
+                if let payload = result as? [String: Any] {
+                    self.decode(ReaderProgressMessage.self, from: payload).map(onProgress)
+                }
+            }
         }
 
         func applyReaderState(to webView: WKWebView) {

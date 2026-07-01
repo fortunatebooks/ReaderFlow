@@ -16,6 +16,7 @@ struct ReaderWebAssetsTests {
         #expect(javascript.contains("applyHighlights"))
         #expect(javascript.contains("pulseHighlight"))
         #expect(javascript.contains("shouldSuppressDuplicateSelection"))
+        #expect(javascript.contains("reportProgress()"))
     }
 
     @Test func readerCSSDeclaresBundledFontFaces() {
@@ -92,6 +93,16 @@ struct ReaderWebAssetsTests {
         #expect(try harness.int("messages.filter(function(message) { return message.type === 'progressChanged' && message.payload.spineIndex === 0; }).length") == 1)
         #expect(try harness.string("messages[messages.length - 1].payload.chapterTitle") == "Chapter 1")
         #expect(try abs(harness.double("messages[messages.length - 1].payload.chapterProgression") - 0.71) < 0.0001)
+    }
+
+    @Test func reportProgressPostsCurrentLocatorWhilePaused() throws {
+        let harness = try ReaderScriptHarness()
+
+        try harness.evaluate("messages = []; window.scrollY = 333; var reportedProgress = window.ReaderFlow.reportProgress();")
+
+        #expect(try harness.int("messages.filter(function(message) { return message.type === 'progressChanged' && message.payload.scrollY === 333; }).length") == 1)
+        #expect(try harness.string("messages[0].payload.href") == "Text/chapter1.xhtml")
+        #expect(try harness.int("reportedProgress.scrollY") == 333)
     }
 
     @Test func scrollToLocatorPrefersExactScrollWhenDocumentHeightMatches() throws {
