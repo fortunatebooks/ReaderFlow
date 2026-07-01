@@ -13,6 +13,8 @@ enum EPUBImportError: LocalizedError {
     case unsupported
     case duplicateImport
     case tooLarge
+    case fixedLayoutUnsupported
+    case protectedPublication
 
     var errorDescription: String? {
         switch self {
@@ -26,6 +28,10 @@ enum EPUBImportError: LocalizedError {
             "This EPUB is already in your ReaderFlow library."
         case .tooLarge:
             "This EPUB is too large for this version of ReaderFlow."
+        case .fixedLayoutUnsupported:
+            "Fixed-layout EPUBs are not supported in this version of ReaderFlow."
+        case .protectedPublication:
+            "ReaderFlow can import DRM-free EPUBs only."
         }
     }
 }
@@ -90,6 +96,10 @@ struct EPUBPackageDocument: Hashable {
     func manifestItem(id: String) -> EPUBManifestItem? {
         manifest.first { $0.id == id }
     }
+
+    var hasFixedLayoutContent: Bool {
+        metadata.isFixedLayout || spine.contains(where: \.hasFixedLayoutProperty)
+    }
 }
 
 struct EPUBPackageMetadata: Hashable {
@@ -99,6 +109,7 @@ struct EPUBPackageMetadata: Hashable {
     var identifier: String?
     var modified: String?
     var coverItemID: String?
+    var renditionLayout: String?
 
     static let empty = EPUBPackageMetadata(
         title: nil,
@@ -106,8 +117,19 @@ struct EPUBPackageMetadata: Hashable {
         language: nil,
         identifier: nil,
         modified: nil,
-        coverItemID: nil
+        coverItemID: nil,
+        renditionLayout: nil
     )
+
+    var isFixedLayout: Bool {
+        guard let renditionLayout else {
+            return false
+        }
+        let normalized = renditionLayout
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized == "pre-paginated" || normalized == "fixed"
+    }
 }
 
 struct EPUBManifestItem: Hashable, Identifiable {
@@ -120,6 +142,15 @@ struct EPUBManifestItem: Hashable, Identifiable {
 struct EPUBSpineItem: Hashable {
     var idref: String
     var linear: Bool
+    var properties: [String] = []
+
+    var hasFixedLayoutProperty: Bool {
+        properties.contains { property in
+            let normalized = property.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return normalized == "rendition:layout-pre-paginated" ||
+                normalized == "rendition:layout-fixed"
+        }
+    }
 }
 
 struct EPUBReadingOrderItem: Hashable {
@@ -297,6 +328,7 @@ private final class EPUBPackageXMLParserDelegate: NSObject, XMLParserDelegate {
         case language
         case identifier
         case modified
+        case renditionLayout
     }
 
     private(set) var metadata = EPUBPackageMetadata.empty
@@ -407,7 +439,8 @@ private final class EPUBPackageXMLParserDelegate: NSObject, XMLParserDelegate {
         spine.append(
             EPUBSpineItem(
                 idref: idref,
-                linear: attributes["linear"]?.lowercased() != "no"
+                linear: attributes["linear"]?.lowercased() != "no",
+                properties: attributes["properties"]?.split(whereSeparator: \.isWhitespace).map(String.init) ?? []
             )
         )
     }
@@ -415,6 +448,27 @@ private final class EPUBPackageXMLParserDelegate: NSObject, XMLParserDelegate {
     private func parseMetadataMeta(attributes: [String: String]) {
         if attributes["property"] == "dcterms:modified" {
             beginText(.modified)
+            return
+        }
+
+        if attributes["property"] == "rendition:layout" {
+            beginText(.renditionLayout)
+            return
+        }
+
+        if attributes["name"]?.lowercased() == "rendition:layout",
+           let layout = attributes["content"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !layout.isEmpty
+        {
+            metadata.renditionLayout = layout
+            return
+        }
+
+        if attributes["name"]?.lowercased() == "fixed-layout",
+           let fixedLayout = attributes["content"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+           ["true", "yes", "1"].contains(fixedLayout)
+        {
+            metadata.renditionLayout = "fixed"
             return
         }
 
@@ -456,6 +510,10 @@ private final class EPUBPackageXMLParserDelegate: NSObject, XMLParserDelegate {
                 }
             case .modified:
                 metadata.modified = value
+            case .renditionLayout:
+                if metadata.renditionLayout == nil {
+                    metadata.renditionLayout = value
+                }
             }
         }
 

@@ -294,9 +294,9 @@ struct EPUBPackageParserTests {
             <item id="style" href="Styles/book.css" media-type="text/css"/>
             <item id="cover-image" href="Images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
           </manifest>
-          <spine>
-            <itemref idref="chapter-1"/>
-            <itemref idref="nav" linear="no"/>
+            <spine>
+                <itemref idref="chapter-1" properties="rendition:layout-reflowable"/>
+                <itemref idref="nav" linear="no"/>
           </spine>
         </package>
         """
@@ -311,13 +311,16 @@ struct EPUBPackageParserTests {
         #expect(package.metadata.identifier == "urn:uuid:test-book")
         #expect(package.metadata.modified == "2026-01-01T00:00:00Z")
         #expect(package.metadata.coverItemID == "cover-image")
+        #expect(package.metadata.renditionLayout == nil)
+        #expect(!package.metadata.isFixedLayout)
         #expect(package.manifest.count == 4)
         #expect(package.manifestItem(id: "nav")?.properties == ["nav"])
         #expect(package.manifestItem(id: "cover-image")?.properties == ["cover-image"])
         #expect(package.spine == [
-            EPUBSpineItem(idref: "chapter-1", linear: true),
+            EPUBSpineItem(idref: "chapter-1", linear: true, properties: ["rendition:layout-reflowable"]),
             EPUBSpineItem(idref: "nav", linear: false),
         ])
+        #expect(!package.hasFixedLayoutContent)
         #expect(package.readingOrder.map(\.href) == ["Text/chapter1.xhtml", "nav.xhtml"])
         #expect(package.readingOrder.map(\.linear) == [true, false])
     }
@@ -380,6 +383,60 @@ struct EPUBPackageParserTests {
         #expect(package.packageRoot == "OEBPS")
         #expect(package.readingOrder.first?.href == "Text/chapter.xhtml")
         #expect(package.resourceResolver.normalizedResourcePath("Text/chapter.xhtml") == "OEBPS/Text/chapter.xhtml")
+    }
+
+    @Test func parsesFixedLayoutRenditionMetadata() throws {
+        let epub3XML = """
+        <package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+          <metadata>
+            <meta property="rendition:layout">pre-paginated</meta>
+          </metadata>
+        </package>
+        """
+        let legacyXML = """
+        <package version="2.0" xmlns="http://www.idpf.org/2007/opf">
+          <metadata>
+            <meta name="rendition:layout" content="fixed"/>
+          </metadata>
+        </package>
+        """
+
+        let epub3Package = try EPUBPackageParser().parsePackageXML(Data(epub3XML.utf8), packagePath: "OPS/content.opf")
+        let legacyPackage = try EPUBPackageParser().parsePackageXML(Data(legacyXML.utf8), packagePath: "OPS/content.opf")
+
+        #expect(epub3Package.metadata.renditionLayout == "pre-paginated")
+        #expect(epub3Package.metadata.isFixedLayout)
+        #expect(legacyPackage.metadata.renditionLayout == "fixed")
+        #expect(legacyPackage.metadata.isFixedLayout)
+    }
+
+    @Test func detectsFixedLayoutSpineAndLegacyMetadata() throws {
+        let spineXML = """
+        <package version="3.0" xmlns="http://www.idpf.org/2007/opf">
+          <metadata/>
+          <manifest>
+            <item id="page" href="page.xhtml" media-type="application/xhtml+xml"/>
+          </manifest>
+          <spine>
+            <itemref idref="page" properties="rendition:layout-pre-paginated"/>
+          </spine>
+        </package>
+        """
+        let legacyFixedLayoutXML = """
+        <package version="2.0" xmlns="http://www.idpf.org/2007/opf">
+          <metadata>
+            <meta name="fixed-layout" content="true"/>
+          </metadata>
+        </package>
+        """
+
+        let spinePackage = try EPUBPackageParser().parsePackageXML(Data(spineXML.utf8), packagePath: "OPS/content.opf")
+        let legacyPackage = try EPUBPackageParser().parsePackageXML(Data(legacyFixedLayoutXML.utf8), packagePath: "OPS/content.opf")
+
+        #expect(spinePackage.spine.first?.properties == ["rendition:layout-pre-paginated"])
+        #expect(spinePackage.hasFixedLayoutContent)
+        #expect(legacyPackage.metadata.renditionLayout == "fixed")
+        #expect(legacyPackage.hasFixedLayoutContent)
     }
 
     @Test func parsesNavigationTableOfContents() throws {

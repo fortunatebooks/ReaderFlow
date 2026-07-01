@@ -7,6 +7,7 @@ struct EPUBPreflightResult: Codable, Hashable {
     var spineItemCount: Int
     var estimatedDomNodeCount: Int
     var imageCount: Int
+    var hasRightsManagementFile: Bool
 
     static let empty = EPUBPreflightResult(
         compressedSizeBytes: 0,
@@ -14,7 +15,8 @@ struct EPUBPreflightResult: Codable, Hashable {
         xhtmlSizeBytes: 0,
         spineItemCount: 0,
         estimatedDomNodeCount: 0,
-        imageCount: 0
+        imageCount: 0,
+        hasRightsManagementFile: false
     )
 }
 

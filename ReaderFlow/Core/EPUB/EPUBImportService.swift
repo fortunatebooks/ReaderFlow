@@ -48,10 +48,21 @@ struct EPUBImportService {
             guard preflightLimits.allows(preflight) else {
                 throw EPUBImportError.tooLarge
             }
+            guard !preflight.hasRightsManagementFile else {
+                throw EPUBImportError.protectedPublication
+            }
 
             let expandedURL = try fileStore.expandedDirectory(for: bookId)
             let expandedArchive = try await archiveExpander.expandArchive(at: copiedURL, to: expandedURL)
+            guard !EPUBUnsupportedPublicationDetector.hasProtectedResources(in: expandedArchive.rootURL) else {
+                throw EPUBImportError.protectedPublication
+            }
             let package = try packageParser.parseExpandedEPUB(at: expandedArchive.rootURL)
+            guard !package.hasFixedLayoutContent,
+                  !EPUBUnsupportedPublicationDetector.hasAppleFixedLayoutDisplayOptions(in: expandedArchive.rootURL)
+            else {
+                throw EPUBImportError.fixedLayoutUnsupported
+            }
             guard package.readingOrder.count <= preflightLimits.maximumSpineItemCount else {
                 throw EPUBImportError.tooLarge
             }

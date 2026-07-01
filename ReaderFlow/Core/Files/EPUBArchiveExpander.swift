@@ -34,6 +34,7 @@ struct EPUBArchiveExpander {
         var xhtmlEntryCount = 0
         var imageCount = 0
         var estimatedDomNodeCount = 0
+        var hasRightsManagementFile = false
 
         for entry in try await archive.entries() {
             guard Self.isSafeArchivePath(entry.path) else {
@@ -41,6 +42,9 @@ struct EPUBArchiveExpander {
             }
 
             let path = entry.path.lowercased()
+            if Self.isRightsManagementPath(path) {
+                hasRightsManagementFile = true
+            }
             let uncompressedSize = Int64(clamping: entry.uncompressedSize)
             expandedSizeBytes = saturatingAdd(expandedSizeBytes, max(0, uncompressedSize))
 
@@ -64,7 +68,8 @@ struct EPUBArchiveExpander {
             xhtmlSizeBytes: xhtmlSizeBytes,
             spineItemCount: xhtmlEntryCount,
             estimatedDomNodeCount: estimatedDomNodeCount,
-            imageCount: imageCount
+            imageCount: imageCount,
+            hasRightsManagementFile: hasRightsManagementFile
         )
     }
 
@@ -89,6 +94,15 @@ struct EPUBArchiveExpander {
         return !components.contains { component in
             component == ".." || component == "."
         }
+    }
+
+    static func isRightsManagementPath(_ path: String) -> Bool {
+        let normalized = path
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized == "meta-inf/rights.xml" ||
+            normalized == "meta-inf/license.lcpl" ||
+            normalized == "meta-inf/license.status"
     }
 
     private func removeIgnoredMetadata(from rootURL: URL) throws {
